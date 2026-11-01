@@ -650,35 +650,41 @@
   }
 
   function applyAivaBrandKit(kit) {
-    if(!kit || !kit.logoDataUrl || kit.useLogo===false){brandImage=null;brandImageSource='';return;}
-    if(brandImageSource===kit.logoDataUrl && brandImage)return;
+    window.AIVA_BRAND_KIT = kit || {};
+    if(!kit || !kit.logoDataUrl || kit.useLogo===false){
+      brandImage=null;brandImageSource='';
+      window.AIVA_DRAW_BRAND_LOGO=()=>{};
+      try { if(typeof window.setTime==='function') window.setTime(time); } catch(error){}
+      return;
+    }
+    if(brandImageSource===kit.logoDataUrl && brandImage){
+      try { if(typeof window.setTime==='function') window.setTime(time); } catch(error){}
+      return;
+    }
     brandImageSource=kit.logoDataUrl;
     const img=new Image();
-    img.onload=()=>{brandImage=img;try{if(typeof window.renderFrame==='function')window.renderFrame(time);}catch(error){}};
+    img.onload=()=>{
+      brandImage=img;
+      try{if(typeof window.setTime==='function')window.setTime(time);else if(typeof window.renderFrame==='function')window.renderFrame(time);}catch(error){}
+    };
     img.onerror=()=>{brandImage=null;console.warn('Brand logo could not be decoded.');};
     img.src=kit.logoDataUrl;
-    const original=window.renderFrame;
-    if(original && !original.__aivaBrandOverlay){
-      const wrapped=function(t){
-        const result=original.apply(this,arguments);
-        const active=window.AIVA_BRAND_KIT||{};
-        const canvas=$id('stage');
-        if(brandImage && canvas && active.useLogo!==false && brandImage.complete && brandImage.naturalWidth){
-          const context=canvas.getContext('2d');
-          const maxW=canvas.width*0.13,maxH=canvas.height*0.08;
-          const scale=Math.min(maxW/brandImage.naturalWidth,maxH/brandImage.naturalHeight);
-          const w=brandImage.naturalWidth*scale,h=brandImage.naturalHeight*scale;
-          const pad=Math.min(canvas.width,canvas.height)*0.035;
-          const position=active.logoPosition||'bottom-right';
-          const x=position.includes('left')?pad:canvas.width-w-pad;
-          const y=position.includes('top')?pad:canvas.height-h-pad;
-          context.save();context.globalAlpha=0.94;context.drawImage(brandImage,x,y,w,h);context.restore();
-        }
-        return result;
-      };
-      wrapped.__aivaBrandOverlay=true;window.renderFrame=wrapped;
-    }
+    window.AIVA_DRAW_BRAND_LOGO=()=>{
+      const active=window.AIVA_BRAND_KIT||{};
+      const canvas=$id('stage');
+      if(!brandImage||!canvas||active.useLogo===false||!brandImage.complete||!brandImage.naturalWidth)return;
+      const context=canvas.getContext('2d');
+      const maxW=canvas.width*0.13,maxH=canvas.height*0.08;
+      const scale=Math.min(maxW/brandImage.naturalWidth,maxH/brandImage.naturalHeight);
+      const w=brandImage.naturalWidth*scale,h=brandImage.naturalHeight*scale;
+      const pad=Math.min(canvas.width,canvas.height)*0.035;
+      const position=active.logoPosition||'bottom-right';
+      const x=position.includes('left')?pad:canvas.width-w-pad;
+      const y=position.includes('top')?pad:canvas.height-h-pad;
+      context.save();context.globalAlpha=0.94;context.drawImage(brandImage,x,y,w,h);context.restore();
+    };
   }
+  window.applyAivaBrandKit = applyAivaBrandKit;
 
   async function openVersionHistory() {
     if (!projectId) { status('Create or open a project first.'); return; }
@@ -849,13 +855,19 @@
       if (typeof drawOverlay === 'function') drawOverlay();
       if (typeof renderPanel === 'function') renderPanel();
       refreshSelection();
+      refreshProperties();
+    };
+    const refreshProperties = () => {
+      const panel=$id('editPane');
+      const selected=typeof SELECTED!=='undefined' && !!SELECTED;
+      if(panel) panel.classList.toggle('is-open',selected);
     };
     if ($id('stage')) {
-      $id('stage').addEventListener('pointerup', () => requestAnimationFrame(refreshSelection));
-      $id('stage').addEventListener('dblclick', () => requestAnimationFrame(refreshSelection));
+      $id('stage').addEventListener('pointerup', () => requestAnimationFrame(() => { refreshSelection(); refreshProperties(); }));
+      $id('stage').addEventListener('dblclick', () => requestAnimationFrame(() => { refreshSelection(); refreshProperties(); }));
     }
     document.addEventListener('keydown', event => {
-      if (event.key === 'Escape') requestAnimationFrame(refreshSelection);
+      if (event.key === 'Escape') requestAnimationFrame(() => { refreshSelection(); refreshProperties(); });
     });
     const includeSelection = () => {
       const selected = typeof SELECTED !== 'undefined' ? SELECTED : null;
@@ -1750,18 +1762,31 @@
     const core = ['get_project','replace_spec','verify_video'];
     const names = Object.keys(TOOL_IMPL || {});
     const state = settingsData.tools && settingsData.tools.state || {};
+    const integrations = settingsData.integrations || {};
+    const gates = {
+      generate_captions:'captions',
+      generate_voiceover:'tts',
+      remove_silence:'ffmpeg',
+      list_motion_presets:'motionLibrary',
+      apply_motion_preset:'motionLibrary'
+    };
     const rows = names.map(name => {
-      const value = core.indexOf(name) >= 0 ? 'on' : (state[name] || 'lazy');
+      const gate = gates[name];
+      const unavailable = !!gate && !(gate === 'ffmpeg' ? ffmpegAvailable : Boolean(integrations[gate]));
+      const value = core.indexOf(name) >= 0 ? 'on' : unavailable ? 'off' : (state[name] || (gate ? 'on' : 'lazy'));
       const description = (TOOL_HELP[name] || '').split(/(?<=\.)\s/)[0].slice(0,100);
       return '<div class="settings-list-row"><div><strong>' + escapeHtml(name) + '</strong><small>' +
-        escapeHtml(description) + '</small></div><select data-tool="' + escapeHtml(name) + '"' +
-        (core.indexOf(name) >= 0 ? ' disabled':'') + '><option value="on">On</option><option value="lazy">Lazy</option><option value="off">Off</option></select></div>';
+        escapeHtml(description) + (unavailable ? ' · Enable and test its integration first.' : '') + '</small></div><select data-tool="' + escapeHtml(name) + '"' +
+        (core.indexOf(name) >= 0 || unavailable ? ' disabled':'') + '><option value="on">On</option><option value="lazy">Lazy</option><option value="off">Off</option></select></div>';
     }).join('');
     $id('settingsContent').innerHTML = settingCard('Agent tool access',
       'On tools are always available. Lazy tools are discovered using find_tools. Off tools are removed from the schema and blocked when called.',
       '<div class="setting-actions"><button id="toolsAll">All on</button><button id="toolsLazy">All lazy</button><button id="toolsNone">All off</button><button id="toolsCore">Core only</button></div>' +
       '<div class="settings-list" id="toolsList">' + rows + '</div><div class="setting-actions"><button id="toolsSave" class="primary">Save tool settings</button></div>');
-    document.querySelectorAll('[data-tool]').forEach(select => select.value = state[select.dataset.tool] || (core.indexOf(select.dataset.tool) >= 0 ? 'on':'lazy'));
+    document.querySelectorAll('[data-tool]').forEach(select => {
+      if (!select.disabled) select.value = state[select.dataset.tool] || (gates[select.dataset.tool] ? 'on' : 'lazy');
+      else select.value = 'off';
+    });
     $id('toolsAll').onclick = () => document.querySelectorAll('[data-tool]:not(:disabled)').forEach(x => x.value = 'on');
     $id('toolsLazy').onclick = () => document.querySelectorAll('[data-tool]:not(:disabled)').forEach(x => x.value = 'lazy');
     $id('toolsNone').onclick = () => document.querySelectorAll('[data-tool]:not(:disabled)').forEach(x => x.value = 'off');
