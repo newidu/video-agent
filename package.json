@@ -1,16 +1,20 @@
 {
   "name": "ai-video-agent",
   "version": "1.0.0",
-  "description": "A Windows-first AI-powered canvas video editor",
+  "description": "Windows-first AI-authored canvas video editor",
   "main": "main.js",
   "private": true,
+  "author": "newidu",
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "check:syntax": "node --check main.js && node --check preload.js && node --check engine.player.js",
+    "check:syntax": "node --check main.js && node --check preload.js && node --check desktop.js && node --check engine.player.js",
     "test": "npm run check:syntax",
-    "dist:win": "electron-builder --win nsis --x64"
+    "dist:win": "electron-builder --win nsis portable --x64 --publish never",
+    "dist:win:release": "electron-builder --win nsis portable --x64 --publish always"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "ffmpeg-static": "^5.2.0",
     "ffprobe-static": "^3.1.0"
   },
@@ -22,12 +26,15 @@
     "appId": "com.newidu.aivideoagent",
     "productName": "AI Video Agent",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "main.js",
       "preload.js",
       "index.html",
+      "desktop.js",
+      "desktop.css",
       "engine.player.js",
       "assets/**/*",
       "package.json"
@@ -44,17 +51,34 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ],
-      "artifactName": "AI-Video-Agent-Setup-${version}-${arch}.${ext}"
+      "artifactName": "AI-Video-Agent-${version}-${arch}-${target}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "AI Video Agent"
+      "shortcutName": "AI Video Agent",
+      "differentialPackage": false
     },
-    "publish": null
+    "portable": {
+      "artifactName": "AI-Video-Agent-${version}-${arch}-portable.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "newidu",
+        "repo": "video-agent",
+        "releaseType": "draft"
+      }
+    ]
   }
 }
