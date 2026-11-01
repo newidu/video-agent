@@ -549,13 +549,42 @@
     status('Project loaded · ' + (data.name || 'Untitled project'));
   }
 
-  async function createNewProject(name) {
-    const title = String(name || 'Untitled project').trim() || 'Untitled project';
+  function renderStoredChat() {
+    const host = $id('chat');
+    if (!host) return;
+    host.innerHTML = '';
+    CHAT.filter(message => message && (message.role === 'user' || message.role === 'assistant' || message.role === 'system'))
+      .slice(-120)
+      .forEach(message => {
+        if (!message.content) return;
+        const bubble = document.createElement('div');
+        bubble.className = 'msg ' + (message.role === 'user' ? 'user' : message.role === 'system' ? 'sys' : 'bot');
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = message.role === 'user' ? 'you' : message.role === 'system' ? 'system' : 'agent';
+        const body = document.createElement('div');
+        body.className = 'mbody';
+        body.textContent = String(message.content);
+        bubble.append(tag, body);
+        host.appendChild(bubble);
+      });
+    host.scrollTop = host.scrollHeight;
+  }
+
+  async function createNewProject(options) {
+    if (!options || typeof options !== 'object') {
+      return openNewProjectWizard();
+    }
+    const title = String(options.name || 'Untitled project').trim() || 'Untitled project';
     try {
+      await persistNow();
       const created = await A.project.create(title);
       projectId = created.id;
       projectName = created.name;
       SPEC = JSON.parse(JSON.stringify(DEFAULT_SPEC));
+      SPEC.title = title;
+      SPEC.format = ['16:9','9:16','1:1'].includes(options.format) ? options.format : '9:16';
+      SPEC.scenes = [];
       EDIT.items = {};
       EDIT.scenes = {};
       EDIT.base = {};
@@ -570,11 +599,14 @@
       if (typeof renderSfxList === 'function') renderSfxList();
       buildScenes();
       syncSpec();
+      if (Number.isFinite(Number(options.duration))) DUR = Math.max(1, Math.min(120, Number(options.duration)));
       setTime(0);
       if ($id('prompt')) $id('prompt').value = '';
       if ($id('chat')) $id('chat').innerHTML = '';
       if ($id('homeScreen')) $id('homeScreen').classList.remove('open');
-      sysNote('New empty project. Describe the video you want the agent to create.');
+      updateProjectTitle();
+      renderProjectSidebar();
+      sysNote('Blank project ready. Describe the video you want to create.');
       status('New project · ' + projectName);
       await persistNow();
       return created;
@@ -586,14 +618,18 @@
 
   async function openProject(id) {
     try {
+      if (projectId && projectId !== id) await persistNow();
       const data = await A.project.load(id);
       applyProjectData(data);
       projectId = data.id;
       projectName = data.name || data.spec.title || 'Untitled project';
+      renderStoredChat();
+      updateProjectTitle();
       if ($id('homeScreen')) $id('homeScreen').classList.remove('open');
+      renderProjectSidebar();
       status('Opened · ' + projectName);
-      if ($id('fileVideo') && data.spec && data.spec.media) {
-        agentStatus('Project opened. Re-upload source video if the media is not embedded.');
+      if (data.spec && (data.spec.media || data.spec.scenes?.some(scene => scene.media)) && !MEDIA.video) {
+        agentStatus('Project reopened. Re-select the source video to reconnect its media file.');
       }
     } catch (error) {
       status('Open failed · ' + error.message);
@@ -601,62 +637,22 @@
   }
 
   function installProjectGallery() {
-    if ($id('homeScreen')) return;
-    const el = document.createElement('section');
-    el.id = 'homeScreen';
-    el.className = 'home-screen';
-    el.innerHTML = '<div class="home-head"><div><h1>Projects</h1><p>Your projects stay on this Windows device.</p></div><span class="spacer"></span><button id="homeImportProject">Import .aivp</button><button id="homeNewProject" class="primary">+ New project</button><button id="homeClose">Close</button></div><div id="projectGrid" class="home-grid"></div>';
-    document.body.appendChild(el);
-    $id('homeNewProject').onclick = () => createNewProject();
-    $id('homeImportProject').onclick = importProjectFile;
-    $id('homeClose').onclick = () => el.classList.remove('open');
+    installProjectSidebar();
   }
 
   async function openProjectGallery() {
-    installProjectGallery();
-    const home = $id('homeScreen');
-    const grid = $id('projectGrid');
-    home.classList.add('open');
-    grid.innerHTML = '<div class="home-empty">Loading projects…</div>';
-    try {
-      const projects = await A.project.list();
-      grid.innerHTML = '';
-      if (!projects.length) {
-        grid.innerHTML = '<div class="home-empty">No saved projects yet. Create a new project to start.</div>';
-        return;
-      }
-      projects.forEach(project => {
-        const card = document.createElement('button');
-        card.className = 'project-card';
-        const thumb = document.createElement('div');
-        thumb.className = 'project-thumb';
-        thumb.textContent = '▶';
-        const name = document.createElement('strong');
-        name.textContent = project.name;
-        const date = document.createElement('small');
-        date.textContent = project.updatedAt ? new Date(project.updatedAt).toLocaleString() : 'Saved project';
-        card.appendChild(thumb);
-        card.appendChild(name);
-        card.appendChild(date);
-        card.onclick = () => openProject(project.id);
-        grid.appendChild(card);
-      });
-    } catch (error) {
-      grid.innerHTML = '<div class="home-empty">Could not load projects · ' + escapeHtml(error.message) + '</div>';
-    }
+    document.body.classList.remove('sidebar-hidden');
+    await renderProjectSidebar();
+    persistUiState();
   }
 
   async function saveProject() {
-    try {
-      if (!projectId) {
-        const created = await A.project.create((SPEC && SPEC.title) || 'Untitled project');
-        projectId = created.id;
-        projectName = created.name;
-      }
-      await persistNow();
-    } catch (error) {
-      status('Save failed · ' + error.message);
+    if (!projectId) {
+      await openNewProjectWizard();
+      return;
     }
+    await persistNow();
+    renderProjectSidebar();
   }
 
   async function importProjectFile() {
@@ -666,10 +662,12 @@
         await openProject(result.project.id);
         status('Imported · ' + result.project.name);
       }
+      renderProjectSidebar();
     } catch (error) {
       status('Import failed · ' + error.message);
     }
   }
+
 
   function showShareMenu() {
     let menu = $id('sharePopover');
