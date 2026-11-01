@@ -806,6 +806,8 @@ function animOffset(a, k, lt) {
    deterministic, and the whole element stays selectable / movable /
    hidable / resetable exactly like the built-in types.               */
 const CODE_CACHE = {};
+const LOTTIE_CACHE = Object.create(null);
+const THREE_CACHE = Object.create(null);
 const ART = {
   P: P, PAL: PAL, INK: INK, clamp: clamp, lerp: lerp, mix: mix,
   eOut: eOut, eIn: eIn, eInOut: eInOut, eOutExpo: eOutExpo, eOutBack: eOutBack,
@@ -816,6 +818,95 @@ const ART = {
   stroke(fn, color, lw) { fn(); ctx.strokeStyle = color || INK; ctx.lineWidth = lw || 10; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke(); },
   reg(lx, ly, w, h) { if (ART.id) regQuad(ART.id, lx, ly, w, h); },
   rnd(i) { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); },
+  lottie(assetId, x, y, w, h, at, duration) {
+    const animationData = SPEC.motionAssets && SPEC.motionAssets[String(assetId)];
+    if (!animationData || !window.lottie || !ctx) return false;
+    let entry = LOTTIE_CACHE[assetId];
+    if (!entry) {
+      const container = document.createElement('div');
+      container.style.cssText = 'position:fixed;left:-12000px;top:-12000px;width:512px;height:512px;overflow:hidden;pointer-events:none;opacity:0';
+      document.body.appendChild(container);
+      const animation = window.lottie.loadAnimation({
+        container, renderer:'canvas', loop:false, autoplay:false,
+        animationData, rendererSettings:{ clearCanvas:true, progressiveLoad:false, preserveAspectRatio:'xMidYMid meet' }
+      });
+      entry = LOTTIE_CACHE[assetId] = {container,animation,ready:false};
+      animation.addEventListener('DOMLoaded', () => {
+        entry.ready = true;
+        if (typeof window.renderFrame === 'function') window.renderFrame(time);
+      });
+    }
+    if (!entry.ready) return false;
+    const animation = entry.animation;
+    const frames = Number(animation.totalFrames) || Number(animationData.op) || 1;
+    const fps = Number(animationData.fr) || 30;
+    const seconds = Math.max(0,Number(at)||0);
+    const frame = Math.max(0,Math.min(frames-1,Math.floor((seconds/Math.max(0.05,Number(duration)||frames/fps))*frames)));
+    animation.goToAndStop(frame,true);
+    const canvas = entry.container.querySelector('canvas');
+    if (!canvas || !canvas.width || !canvas.height) return false;
+    ctx.drawImage(canvas,x,y,w,h);
+    return true;
+  },
+  cube3D(x,y,w,h,at,color) {
+    const THREE = window.THREE;
+    if (!THREE || !ctx || !(w>0&&h>0)) return false;
+    const key = ART.id || 'default';
+    let entry = THREE_CACHE[key];
+    try {
+      if (!entry) {
+        const canvas = document.createElement('canvas');
+        const renderer = new THREE.WebGLRenderer({canvas,alpha:true,antialias:true,preserveDrawingBuffer:true});
+        renderer.setPixelRatio(1);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(36,1,0.1,100);
+        camera.position.set(0,0,6);
+        scene.add(new THREE.AmbientLight(0xffffff,1.25));
+        const light = new THREE.DirectionalLight(0xffffff,2.2);
+        light.position.set(-3,4,6);scene.add(light);
+        const geometry = new THREE.BoxGeometry(2.0,2.0,2.0);
+        const material = new THREE.MeshStandardMaterial({color:color||'#C65A2E',metalness:0.28,roughness:0.32});
+        const mesh = new THREE.Mesh(geometry,material);scene.add(mesh);
+        entry = THREE_CACHE[key] = {renderer,scene,camera,mesh,canvas};
+      }
+      const width=Math.max(64,Math.min(1200,Math.round(w))),height=Math.max(64,Math.min(1200,Math.round(h)));
+      if(entry.canvas.width!==width||entry.canvas.height!==height){
+        entry.renderer.setSize(width,height,false);
+        entry.camera.aspect=width/height;entry.camera.updateProjectionMatrix();
+      }
+      entry.mesh.rotation.x=(Number(at)||0)*0.62+0.28;
+      entry.mesh.rotation.y=(Number(at)||0)*0.84+0.42;
+      entry.renderer.render(entry.scene,entry.camera);
+      ctx.drawImage(entry.canvas,x,y,w,h);
+      return true;
+    } catch(error) {
+      console.warn('Three.js canvas render unavailable:',error);
+      return false;
+    }
+  },
+  sphere3D(x,y,w,h,at,color) {
+    const THREE = window.THREE;
+    if (!THREE || !ctx || !(w>0&&h>0)) return false;
+    const key = (ART.id || 'default') + ':sphere';
+    let entry = THREE_CACHE[key];
+    try {
+      if (!entry) {
+        const canvas=document.createElement('canvas');
+        const renderer=new THREE.WebGLRenderer({canvas,alpha:true,antialias:true,preserveDrawingBuffer:true});
+        const scene=new THREE.Scene();const camera=new THREE.PerspectiveCamera(38,1,0.1,100);camera.position.z=5.5;
+        scene.add(new THREE.AmbientLight(0xffffff,1.2));
+        const light=new THREE.PointLight(0xffffff,3);light.position.set(-2,3,4);scene.add(light);
+        const mesh=new THREE.Mesh(new THREE.IcosahedronGeometry(1.45,2),new THREE.MeshStandardMaterial({color:color||'#C65A2E',metalness:.4,roughness:.3,flatShading:true}));
+        scene.add(mesh);entry=THREE_CACHE[key]={canvas,renderer,scene,camera,mesh};
+      }
+      const width=Math.max(64,Math.min(1200,Math.round(w))),height=Math.max(64,Math.min(1200,Math.round(h)));
+      if(entry.canvas.width!==width||entry.canvas.height!==height){
+        entry.renderer.setSize(width,height,false);entry.camera.aspect=width/height;entry.camera.updateProjectionMatrix();
+      }
+      entry.mesh.rotation.x=(Number(at)||0)*.48;entry.mesh.rotation.y=(Number(at)||0)*.74;
+      entry.renderer.render(entry.scene,entry.camera);ctx.drawImage(entry.canvas,x,y,w,h);return true;
+    }catch(error){console.warn('Three.js sphere render unavailable:',error);return false;}
+  },
   W: W, H: H, t: 0, dur: 1, id: null, e: null
 };
 window.ART = ART;
@@ -4636,5 +4727,11 @@ document.getElementById('status').textContent = 'Blank stage — nothing is buil
 
 </script>
 <script src="desktop.js"></script>
+<script src="./node_modules/lottie-web/build/player/lottie.js"></script>
+<script type="module">
+  import * as THREE from './node_modules/three/build/three.module.js';
+  window.THREE = THREE;
+  window.__AIVA_THREE_READY__ = true;
+</script>
 </body>
 </html>
