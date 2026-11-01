@@ -623,7 +623,14 @@
             '\nBody font: '+(kit.bodyFont||'Inter')+'\nLogo available: '+(kit.logoDataUrl?'yes, persistent app overlay':'no')+
             '\nUse these exact colours and fonts consistently; do not invent a competing palette.';
         }
-        if(projectTemplate && projectTemplate!=='blank')prompt+='\n\nSTARTER TEMPLATE: '+projectTemplate+'. Treat it as an editable scaffold and rewrite the scenes to match the user brief.';
+        if(projectTemplate && projectTemplate!=='blank'){
+          const templateBrief={
+            'youtube-intro':'Structure: 0–2s attention hook; 2–5s channel/logo reveal; 5–8s concise promise and CTA. Use a strong opening frame, editable kinetic typography and a clean logo hold.',
+            'instagram-story':'Structure: 0–2s vertical hook; 2–7s one clear story beat; 7–11s proof or benefit; 11–15s CTA. Keep all important text inside mobile safe areas.',
+            'product-demo':'Structure: problem; product reveal; 2–3 concrete features; proof/result; final CTA. Show real product details only when provided and avoid fabricated claims.'
+          };
+          prompt+='\n\nSTARTER TEMPLATE: '+projectTemplate+'. '+(templateBrief[projectTemplate]||'Use a short editable structure with a clear opening, main message and close.')+' These are editable scaffolds, not locked templates. Replace every scene as needed to match the user brief.';
+        }
         if(settingsData && settingsData.integrations && settingsData.integrations.motionLibrary){
           prompt+='\n\nMOTION LIBRARY: Use apply_motion_preset when reusable code animation is helpful. Existing code elements run JavaScript on the native canvas; keep code deterministic, performant and editable. Do not claim unavailable Lottie or Three.js rendering.';
         }
@@ -799,7 +806,7 @@
     };
     stage.addEventListener('pointerdown',event=>{
       if(!commentMode)return;
-      event.preventDefault();event.stopImmediatePropagation();
+      event.stopImmediatePropagation();
     },true);
     stage.addEventListener('click',event=>{
       if(!commentMode)return;
