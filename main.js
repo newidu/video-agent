@@ -299,6 +299,184 @@ ipcMain.handle('projects:delete', async (_event, id) => {
   return true;
 });
 
+function importedProject(input) {
+  if (!input || typeof input !== 'object') throw new Error('The selected file does not contain a project.');
+  const source = input.project && typeof input.project === 'object' ? input.project : input;
+  const spec = source.spec;
+  if (!spec || typeof spec !== 'object') throw new Error('The project file is missing its video spec.');
+  const name = String(source.name || spec.title || 'Imported project').slice(0,100);
+  const formatName = String(spec.format || '9:16');
+  const dimensions = {
+    '9:16': { width:1080, height:1920 },
+    '16:9': { width:1920, height:1080 },
+    '1:1': { width:1080, height:1080 }
+  };
+  const sceneDuration = Array.isArray(spec.scenes)
+    ? spec.scenes.reduce((sum, scene) => sum + Math.max(0.1, Number(scene.dur) || 3), 0)
+    : 15;
+  const data = {
+    ...source,
+    id: makeProject(name).id,
+    name,
+    format: source.format && typeof source.format === 'object' ? source.format : (dimensions[formatName] || dimensions['9:16']),
+    duration: Number(source.duration) || Math.min(120, Math.max(1, sceneDuration)),
+    playhead: 0,
+    items: source.items && typeof source.items === 'object' ? source.items :
+      ((source.edit && source.edit.items) || {}),
+    edit: source.edit && typeof source.edit === 'object' ? source.edit : {
+      items: source.items || {},
+      scenes: source.scenes || {},
+      base: source.base || {}
+    }
+  };
+  return validateProject(data);
+}
+
+ipcMain.handle('share:bundle', async (_event, input) => {
+  const project = validateProject(input);
+  const baseName = String(project.name || 'AI-Video-Agent')
+    .replace(/[<>:"/\\|?*]+/g, '-').replace(/\s+/g, '-').slice(0,80) || 'AI-Video-Agent';
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: baseName + '.aivp',
+    filters: [{ name:'AI Video Agent project', extensions:['aivp'] }]
+  });
+  if (result.canceled || !result.filePath) return { canceled:true };
+  const output = result.filePath.toLowerCase().endsWith('.aivp') ? result.filePath : result.filePath + '.aivp';
+  const partial = output + '.partial';
+  const archiver = require('archiver');
+  try {
+    await new Promise((resolve,reject) => {
+      const stream = fs.createWriteStream(partial);
+      const archive = archiver('zip',{ zlib:{ level:9 } });
+      stream.once('close',resolve);
+      stream.once('error',reject);
+      archive.once('error',reject);
+      archive.pipe(stream);
+      archive.append(JSON.stringify({
+        format:'aivp',
+        version:1,
+        name:project.name,
+        createdAt:Date.now(),
+        appVersion:app.getVersion()
+      },null,2),{name:'manifest.json'});
+      archive.append(JSON.stringify(project),{name:'project.json'});
+      archive.append(
+        'AI Video Agent editable project bundle.\nOpen this file from the project gallery to import it.',
+        {name:'README.txt'}
+      );
+      archive.finalize().catch(reject);
+    });
+    await fsp.rename(partial,output);
+    const stat=await fsp.stat(output);
+    return {saved:true,path:output,bytes:stat.size,format:'aivp'};
+  } catch(error) {
+    await fsp.rm(partial,{force:true});
+    throw error;
+  }
+});
+
+ipcMain.handle('share:html', async (_event, input) => {
+  const project = validateProject(input);
+  const baseName = String(project.name || 'AI-Video-Agent')
+    .replace(/[<>:"/\\|?*]+/g,'-').replace(/\s+/g,'-').slice(0,80) || 'AI-Video-Agent';
+  const result = await dialog.showSaveDialog(mainWindow,{
+    defaultPath:baseName+'.html',
+    filters:[{name:'Standalone HTML video',extensions:['html']}]
+  });
+  if(result.canceled||!result.filePath)return {canceled:true};
+  const output=result.filePath.toLowerCase().endsWith('.html')?result.filePath:result.filePath+'.html';
+  const playerSource=await fsp.readFile(path.join(ROOT,'engine.player.js'),'utf8');
+  const safeProject=JSON.stringify(project)
+    .replace(/</g,'\\u003c')
+    .replace(/\u2028/g,'\\u2028')
+    .replace(/\u2029/g,'\\u2029');
+  const safeTitle=String(project.name||'AI Video Agent').replace(/[&<>"]/g,'');
+  const boot=[
+    'const project='+safeProject+';',
+    'const canvas=document.getElementById("stage");',
+    'let player;',
+    'const clock=document.getElementById("clock");',
+    'const scrub=document.getElementById("scrub");',
+    'const playButton=document.getElementById("play");',
+    'player=window.AIVideoPlayer.createPlayer(canvas,project,{onTime:function(t,d){',
+    'clock.textContent=t.toFixed(2)+"s / "+d.toFixed(2)+"s";',
+    'scrub.max=String(d);scrub.value=String(t);',
+    'playButton.textContent=player.playing?"Pause":"Play";',
+    '}});',
+    'scrub.max=String(player.duration);scrub.value=String(player.time);',
+    'playButton.addEventListener("click",function(){if(player.playing)player.pause();else player.play();playButton.textContent=player.playing?"Pause":"Play";});',
+    'scrub.addEventListener("input",function(){player.seek(Number(scrub.value));});',
+    'document.getElementById("speed").addEventListener("change",function(e){player.setSpeed(Number(e.target.value));});',
+    'document.getElementById("volume").addEventListener("input",function(e){player.setVolume(Number(e.target.value));});',
+    'document.getElementById("fullscreen").addEventListener("click",function(){const box=document.getElementById("player");if(!document.fullscreenElement)box.requestFullscreen?.();else document.exitFullscreen?.();});',
+    'window.addEventListener("beforeunload",function(){player.destroy();});'
+  ].join('\n');
+  const safePlayer=playerSource.replace(/<\/script/gi,'<\\/script');
+  const html=[
+    '<!doctype html>',
+    '<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+    '<title>'+safeTitle+'</title>',
+    '<style>',
+    '*{box-sizing:border-box}body{margin:0;background:#111;color:#f7f7f5;font:14px/1.4 system-ui,Segoe UI,sans-serif;min-height:100vh;display:grid;place-items:center}',
+    '#player{width:min(100vw,1200px);height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;gap:14px}',
+    'canvas{max-width:100%;max-height:calc(100vh - 100px);width:auto;height:auto;object-fit:contain;background:#000;box-shadow:0 14px 50px #0008}',
+    '#controls{width:min(100%,900px);display:flex;align-items:center;gap:10px}button,select{background:#282828;border:1px solid #484848;color:#fff;border-radius:7px;padding:7px 11px}input[type=range]{accent-color:#f7f7f5;min-width:70px;flex:1}#clock{font:12px ui-monospace,monospace;white-space:nowrap;color:#bbb}',
+    '</style></head><body>',
+    '<main id="player"><canvas id="stage"></canvas><div id="controls">',
+    '<button id="play">Play</button><input id="scrub" type="range" min="0" max="15" step=".01" value="0"><span id="clock">0.00s</span>',
+    '<select id="speed"><option value=".25">0.25×</option><option value=".5">0.5×</option><option value=".75">0.75×</option><option selected value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>',
+    '<input id="volume" type="range" min="0" max="1" step=".01" value=".8" title="Volume"><button id="fullscreen">Fullscreen</button>',
+    '</div></main>',
+    '<script>'+safePlayer+'</script>',
+    '<script>'+boot+'</script>',
+    '</body></html>'
+  ].join('\n');
+  await fsp.writeFile(output,html,'utf8');
+  const stat=await fsp.stat(output);
+  if(!stat.size)throw new Error('The standalone HTML export is empty.');
+  return {saved:true,path:output,bytes:stat.size,format:'html'};
+});
+
+ipcMain.handle('projects:import', async () => {
+  const result=await dialog.showOpenDialog(mainWindow,{
+    properties:['openFile'],
+    filters:[
+      {name:'AI Video Agent projects',extensions:['aivp','json']},
+      {name:'All files',extensions:['*']}
+    ]
+  });
+  if(result.canceled||!result.filePaths.length)return {canceled:true};
+  const sourcePath=result.filePaths[0];
+  const stat=await fsp.stat(sourcePath);
+  if(stat.size>250*1024*1024)throw new Error('Project import exceeds the 250 MB limit.');
+  const ext=path.extname(sourcePath).toLowerCase();
+  let data;
+  if(ext==='.aivp'){
+    const temp=path.join(app.getPath('temp'),'aiva-import-'+randomUUID());
+    try{
+      await fsp.mkdir(temp,{recursive:true});
+      await require('extract-zip')(sourcePath,{dir:temp});
+      const manifestPath=path.join(temp,'manifest.json');
+      const projectPath=path.join(temp,'project.json');
+      if(!fs.existsSync(manifestPath)||!fs.existsSync(projectPath))throw new Error('Invalid .aivp bundle: manifest.json or project.json is missing.');
+      const manifest=readJson(manifestPath,null);
+      if(!manifest||manifest.format!=='aivp'||Number(manifest.version)!==1)throw new Error('This .aivp bundle version is not supported.');
+      data=readJson(projectPath,null);
+      if(!data)throw new Error('The project payload could not be read.');
+    }finally{
+      await fsp.rm(temp,{recursive:true,force:true});
+    }
+  }else if(ext==='.json'){
+    data=readJson(sourcePath,null);
+    if(!data)throw new Error('The selected JSON file could not be parsed.');
+  }else{
+    throw new Error('Choose an .aivp or .json project file.');
+  }
+  const project=importedProject(data);
+  await writeJsonAtomic(projectFile(project.id),project);
+  return {imported:true,project:{id:project.id,name:project.name,updatedAt:project.updatedAt}};
+});
+
 ipcMain.handle('providers:list', () => {
   const data = readConfig('providers', { active: null, providers: [] });
   const secrets = readSecrets();
