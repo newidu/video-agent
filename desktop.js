@@ -149,6 +149,22 @@
         return result;
       };
     }
+    const originalSetTime = window.setTime;
+    if (typeof originalSetTime === 'function') {
+      window.setTime = function () {
+        const result = originalSetTime.apply(this, arguments);
+        if (!window.playing) scheduleSave();
+        return result;
+      };
+    }
+    const originalPause = window.pause;
+    if (typeof originalPause === 'function') {
+      window.pause = function () {
+        const result = originalPause.apply(this, arguments);
+        scheduleSave();
+        return result;
+      };
+    }
     window.addEventListener('blur', persistNow);
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') persistNow();
@@ -211,7 +227,9 @@
       CHAT.length = 0;
       if (typeof TODOS !== 'undefined') TODOS = [];
       Object.keys(CROP_IMGS).forEach(key => delete CROP_IMGS[key]);
-      setMusic({ clear: true, enabled: false });
+      setMusic({ clear: true });
+      MUSIC.on = false;
+      if (typeof setMusicOn === 'function') setMusicOn(false);
       SFX.length = 0;
       if (typeof renderSfxList === 'function') renderSfxList();
       buildScenes();
@@ -842,6 +860,8 @@
     installToolPolicy();
     installPlayerControls();
     installPosterExport();
+    if ($id('btnSave')) $id('btnSave').onclick = saveProject;
+    if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     try {
       const pair = await Promise.all([A.app.info(),A.settings.get()]);
       ffmpegAvailable = !!pair[0].ffmpegAvailable;
