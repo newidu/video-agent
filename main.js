@@ -318,6 +318,10 @@ function validateProject(input) {
     items: input.items && typeof input.items === 'object' ? input.items : [],
     edit: input.edit && typeof input.edit === 'object' ? input.edit : undefined,
     chat: Array.isArray(input.chat) ? input.chat.slice(-300) : [],
+    comments: Array.isArray(input.comments) ? input.comments.slice(-500) : [],
+    brandKit: input.brandKit && typeof input.brandKit === 'object' ? input.brandKit : undefined,
+    template: typeof input.template === 'string' ? input.template.slice(0,80) : undefined,
+    sourceMediaName: typeof input.sourceMediaName === 'string' ? input.sourceMediaName.slice(0,240) : undefined,
     updatedAt: Date.now()
   };
 }
@@ -897,33 +901,36 @@ ipcMain.handle('settings:save-tools', async (_event, value) => {
 
 ipcMain.handle('settings:save-integrations', async (_event, value) => {
   const old = getIntegrationsConfig();
-  const raw = readConfig('integrations', {});
   const secrets = readSecrets();
+  const hasNewCaptionKey = Boolean(value.captions && String(value.captions.apiKey || '').trim());
+  const hasNewTtsKey = Boolean(value.tts && String(value.tts.apiKey || '').trim());
+  const captionBase = normaliseIntegrationUrl(value.captions?.base_url || old.captions.base_url || 'https://api.openai.com/v1','Captions');
+  const ttsBase = normaliseIntegrationUrl(value.tts?.base_url || old.tts.base_url || 'https://api.openai.com/v1','TTS');
   const result = {
     ffmpeg: value.ffmpeg !== false,
     captions: {
-      enabled: Boolean(value.captions && value.captions.enabled && old.captions.tested && secrets['integration:captions']),
-      base_url: normaliseIntegrationUrl(value.captions?.base_url || old.captions.base_url || 'https://api.openai.com/v1','Captions'),
+      enabled: Boolean(value.captions && value.captions.enabled && old.captions.tested && !hasNewCaptionKey && captionBase === old.captions.base_url && secrets['integration:captions']),
+      base_url: captionBase,
       model: String(value.captions?.model || old.captions.model || 'whisper-1').slice(0,100),
       language: String(value.captions?.language || old.captions.language || 'auto').slice(0,12),
-      tested:Boolean(old.captions.tested)
+      tested:Boolean(old.captions.tested && !hasNewCaptionKey && captionBase === old.captions.base_url)
     },
     tts: {
-      enabled: Boolean(value.tts && value.tts.enabled && old.tts.tested && secrets['integration:tts']),
-      base_url: normaliseIntegrationUrl(value.tts?.base_url || old.tts.base_url || 'https://api.openai.com/v1','TTS'),
+      enabled: Boolean(value.tts && value.tts.enabled && old.tts.tested && !hasNewTtsKey && ttsBase === old.tts.base_url && secrets['integration:tts']),
+      base_url: ttsBase,
       model: String(value.tts?.model || old.tts.model || 'tts-1').slice(0,100),
       voice: String(value.tts?.voice || old.tts.voice || 'alloy').slice(0,80),
-      tested:Boolean(old.tts.tested)
+      tested:Boolean(old.tts.tested && !hasNewTtsKey && ttsBase === old.tts.base_url)
     },
     image:Boolean(value.image),
     music:Boolean(value.music),
     webSearch:Boolean(value.webSearch),
     motionLibrary:value.motionLibrary !== false
   };
-  if (value.captions && typeof value.captions.apiKey === 'string' && value.captions.apiKey.trim()) {
+  if (hasNewCaptionKey) {
     secrets['integration:captions'] = value.captions.apiKey.trim();
   }
-  if (value.tts && typeof value.tts.apiKey === 'string' && value.tts.apiKey.trim()) {
+  if (hasNewTtsKey) {
     secrets['integration:tts'] = value.tts.apiKey.trim();
   }
   await writeSecrets(secrets);
