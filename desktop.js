@@ -2336,6 +2336,7 @@
   }
 
   async function initSettings() {
+    installMediaAgentTools();
     createSettingsMarkup();
     try {
       const pair = await Promise.all([A.settings.get(),A.providers.list(),A.app.info()]);
@@ -2344,6 +2345,7 @@
       settingsData.integrations = settingsData.integrations || {};
       ffmpegAvailable = !!pair[2].ffmpegAvailable;
       toolStates = (settingsData.tools && settingsData.tools.state) || {};
+      installToolPolicy();
       applyAppearance(settingsData.appearance);
       document.querySelectorAll('[data-settings-tab]').forEach(button => {
         button.onclick = () => setSettingsTab(button.dataset.settingsTab);
@@ -2407,6 +2409,30 @@
     try { await A.settings.saveAppearance(current); } catch (error) { status(error.message); }
   });
   A.onThemeChanged(applyAppearance);
+  A.onSettingsChanged(async change => {
+    if (!change || !settingsData) return;
+    if (change.section === 'providers') {
+      await loadProviderConfig();
+      return;
+    }
+    if (change.section === 'integrations') {
+      settingsData.integrations = change.value || {};
+      const fresh = await A.settings.get();
+      settingsData.tools = fresh.tools || settingsData.tools;
+      toolStates = settingsData.tools && settingsData.tools.state || {};
+      return;
+    }
+    if (change.section === 'tools') {
+      settingsData.tools = change.value || {};
+      toolStates = settingsData.tools.state || {};
+      return;
+    }
+    if (change.section === 'brand') {
+      settingsData.brandKit = change.value || {};
+      window.AIVA_BRAND_KIT = settingsData.brandKit;
+      applyAivaBrandKit(settingsData.brandKit);
+    }
+  });
   A.onBrandChanged(value => {
     settingsData = settingsData || {};
     settingsData.brandKit=value;
