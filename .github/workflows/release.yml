@@ -30,5 +30,4 @@ jobs:
         run: npm run dist:win:release
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        env:
-          GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
