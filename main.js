@@ -17,6 +17,12 @@ const JOBS = new Map();
 let mainWindow = null;
 let settingsWindow = null;
 
+function notifyStudio(section, value) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('settings:changed', { section, value });
+  }
+}
+
 function readJson(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -711,6 +717,7 @@ ipcMain.handle('providers:save', async (_event, input) => {
   data.providers.push(provider);
   if (!data.active || !exists && data.providers.length === 1) data.active = provider.id;
   await writeConfig('providers', data);
+  notifyStudio('providers', { active: data.active });
   return { saved: true, active: data.active };
 });
 
@@ -719,6 +726,7 @@ ipcMain.handle('providers:set-active', async (_event, id) => {
   if (!(data.providers || []).some(p => p.id === id)) throw new Error('Provider not found.');
   data.active = id;
   await writeConfig('providers', data);
+  notifyStudio('providers', { active: data.active });
   return true;
 });
 
@@ -730,6 +738,7 @@ ipcMain.handle('providers:delete', async (_event, id) => {
   delete secrets['provider:' + id];
   await writeSecrets(secrets);
   await writeConfig('providers', data);
+  notifyStudio('providers', { active: data.active });
   return true;
 });
 
@@ -1078,6 +1087,7 @@ ipcMain.handle('settings:save-tools', async (_event, value) => {
   for (const [name, status] of Object.entries(state)) clean[name] = ['on', 'lazy', 'off'].includes(status) ? status : 'off';
   const result = { state: clean, options: value.options || {} };
   await writeConfig('tools', result);
+  notifyStudio('tools', result);
   return result;
 });
 
@@ -1117,7 +1127,9 @@ ipcMain.handle('settings:save-integrations', async (_event, value) => {
   }
   await writeSecrets(secrets);
   await writeConfig('integrations', result);
-  return getIntegrationsConfig();
+  const saved = getIntegrationsConfig();
+  notifyStudio('integrations', saved);
+  return saved;
 });
 
 ipcMain.handle('integrations:test', async (_event, kind, input) => {
@@ -1147,7 +1159,9 @@ ipcMain.handle('integrations:test', async (_event, kind, input) => {
     modelCount:test.models.length
   };
   await writeConfig('integrations',integrations);
-  return { connected:true,models:test.models,config:getIntegrationsConfig()[kind] };
+  const saved = getIntegrationsConfig();
+  notifyStudio('integrations', saved);
+  return { connected:true,models:test.models,config:saved[kind] };
 });
 
 ipcMain.handle('brand:save', async (_event, input) => {
@@ -1182,6 +1196,7 @@ ipcMain.handle('brand:save', async (_event, input) => {
   }
   await writeConfig('brand',brand);
   mainWindow?.webContents.send('brand:changed',brand);
+  notifyStudio('brand', brand);
   return brand;
 });
 
