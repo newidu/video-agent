@@ -320,7 +320,7 @@ async function projectList() {
     thumbnail: project.thumbnail || null,
     format: project.spec?.format || null,
     duration: project.duration || null
-  })).sort((a, b) => (b.updatedAt || b.lastOpenedAt) - (a.updatedAt || a.lastOpenedAt));
+  })).sort((a, b) => (b.lastOpenedAt || b.updatedAt || b.createdAt) - (a.lastOpenedAt || a.updatedAt || a.createdAt));
 }
 
 function validateProject(input) {
