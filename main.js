@@ -361,6 +361,60 @@ ipcMain.handle('app:info', () => ({
 ipcMain.handle('window:settings', () => { openSettingsWindow(); return true; });
 ipcMain.handle('window:reveal-data', async () => { await shell.openPath(DATA()); return DATA(); });
 
+function motionLibrary() {
+  const value=readConfig('motion-presets',{items:[]});
+  return Array.isArray(value.items)?value.items:[];
+}
+ipcMain.handle('motion:list', () => motionLibrary().map(({id,name,description,type,createdAt})=>({id,name,description,type,createdAt})));
+ipcMain.handle('motion:get', (_event,id) => {
+  const item=motionLibrary().find(entry=>entry.id===String(id));
+  if(!item)throw new Error('Motion preset not found.');
+  if(item.type==='lottie'){
+    const file=path.join(CONFIG(),'motion',item.id+'.json');
+    const data=readJson(file,null);
+    if(!data)throw new Error('Lottie animation data is missing.');
+    return {...item,animationData:data};
+  }
+  return item;
+});
+ipcMain.handle('motion:save', async (_event,input) => {
+  const name=String(input.name||'').trim().slice(0,80);
+  const js=String(input.js||'');
+  if(!name)throw new Error('Enter a name for this motion preset.');
+  if(!js.trim()||js.length>24000)throw new Error('Motion code must contain 1–24,000 characters.');
+  const id='motion_'+randomUUID().replace(/-/g,'').slice(0,16);
+  const items=motionLibrary();
+  const item={id,name,description:String(input.description||'User-created canvas animation').slice(0,180),type:'code',js,createdAt:Date.now()};
+  items.unshift(item);
+  await writeConfig('motion-presets',{items:items.slice(0,100)});
+  return {id,name,description:item.description,type:item.type,createdAt:item.createdAt};
+});
+ipcMain.handle('motion:save-lottie', async (_event,input) => {
+  const name=String(input.name||'').trim().slice(0,80);
+  const data=input.animationData;
+  if(!name)throw new Error('Enter a name for this Lottie animation.');
+  if(!data||typeof data!=='object'||!Array.isArray(data.layers)||!Number(data.fr))throw new Error('This is not a valid Lottie JSON animation.');
+  const encoded=JSON.stringify(data);
+  if(Buffer.byteLength(encoded,'utf8')>10*1024*1024)throw new Error('Lottie JSON exceeds the 10 MB limit.');
+  const id='lottie_'+randomUUID().replace(/-/g,'').slice(0,16);
+  const folder=path.join(CONFIG(),'motion');
+  await fsp.mkdir(folder,{recursive:true});
+  await writeJsonAtomic(path.join(folder,id+'.json'),data);
+  const items=motionLibrary();
+  const item={id,name,description:String(input.description||'Imported Lottie animation').slice(0,180),type:'lottie',createdAt:Date.now(),frames:Number(data.op)||0,fps:Number(data.fr)||0};
+  items.unshift(item);
+  await writeConfig('motion-presets',{items:items.slice(0,100)});
+  return item;
+});
+ipcMain.handle('motion:delete', async (_event,id) => {
+  const items=motionLibrary();
+  const item=items.find(entry=>entry.id===String(id));
+  if(!item)return false;
+  if(item.type==='lottie')await fsp.rm(path.join(CONFIG(),'motion',item.id+'.json'),{force:true});
+  await writeConfig('motion-presets',{items:items.filter(entry=>entry.id!==item.id)});
+  return true;
+});
+
 ipcMain.handle('projects:get-root', () => workspaceRoot());
 ipcMain.handle('projects:get-workspace-info', () => {
   const saved = readConfig('workspace', { root: null });
