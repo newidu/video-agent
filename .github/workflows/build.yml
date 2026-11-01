@@ -1,0 +1,39 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm install
+      - name: Syntax and unit checks
+        run: npm test
+      - name: Build NSIS installer and portable EXE
+        run: npm run dist:win
+        env:
+          WIN_CSC_LINK: \${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: \${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Video-Agent-Windows-\${{ github.run_number }}
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.yml
+          if-no-files-found: error
+          retention-days: 30
