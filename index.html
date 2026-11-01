@@ -982,6 +982,9 @@ function renderFrame(time) {
     try { drawEl(sc, el, i, lt); } catch (err) { console.warn('element', el && el.type, err); }
   });
   drawCrops(time);
+  if (typeof window.AIVA_DRAW_BRAND_LOGO === 'function') {
+    try { window.AIVA_DRAW_BRAND_LOGO(); } catch (error) { console.warn('Brand Kit overlay could not render.', error); }
+  }
 }
 window.renderFrame = renderFrame;
 window.buildScenes = buildScenes;
