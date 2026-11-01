@@ -506,18 +506,26 @@
       const mode=String(args && args.style || 'fade');
       const allowed=['fade','rise','slideL','slideR'];
       const animation=allowed.includes(mode)?mode:'fade';
-      let count=0;
-      (SPEC.scenes||[]).forEach(scene=>{
+      const transition=String(args && args.transition || 'fade');
+      const transitionTypes=['fade','wipe-left','wipe-right','wipe-up','wipe-down'];
+      const transitionType=transitionTypes.includes(transition)?transition:'fade';
+      const duration=Math.max(0.25,Math.min(1.5,Number(args && args.duration)||0.45));
+      let count=0,sceneCount=0;
+      (SPEC.scenes||[]).forEach((scene,sceneIndex)=>{
+        if(sceneIndex>0){
+          scene.transitionIn={type:transitionType,duration};
+          sceneCount++;
+        }
         (scene.elements||[]).forEach((element,index)=>{
           if(!element.anim || element.anim==='none'){
             element.anim=animation;element.delay=Math.min(0.12,index*0.035);
-            element.dur=Math.max(0.25,Math.min(0.7,Number(args && args.duration)||0.45));count++;
+            element.dur=duration;count++;
           }
         });
       });
       try{if(window.SFX_API)window.SFX_API.auto({beat:false});}catch(error){}
       buildScenes();syncSpec();renderFrame(time);
-      return 'Applied '+animation+' entrance motion to '+count+' elements and added subtle cut sound cues. Existing custom animations were preserved.';
+      return 'Applied '+animation+' entrance motion to '+count+' elements, '+transitionType+' scene transitions to '+sceneCount+' scene cuts, and subtle cut sound cues. Existing custom element animations were preserved.';
     };
     TOOL_IMPL.smart_reframe = args => {
       const format=String(args && args.format || SPEC.format || '9:16');
@@ -603,7 +611,7 @@
           remove_silence:{type:'object',properties:{thresholdDb:{type:'number'},minimumSeconds:{type:'number'},paddingSeconds:{type:'number'}},required:[]},
           smart_reframe:{type:'object',properties:{format:{type:'string',enum:['9:16','16:9','1:1']},focusX:{type:'number'},focusY:{type:'number'}},required:['format']},
           generate_voiceover:{type:'object',properties:{text:{type:'string'},voice:{type:'string'},volume:{type:'number'}},required:['text']},
-          auto_transitions:{type:'object',properties:{style:{type:'string',enum:['fade','rise','slideL','slideR']},duration:{type:'number'}},required:[]},
+          auto_transitions:{type:'object',properties:{style:{type:'string',enum:['fade','rise','slideL','slideR']},transition:{type:'string',enum:['fade','wipe-left','wipe-right','wipe-up','wipe-down']},duration:{type:'number'}},required:[]},
           apply_motion_preset:{type:'object',properties:{preset:{type:'string',enum:Object.keys(presets)},sceneId:{type:'string'}},required:['preset']},
           add_video_comment:{type:'object',properties:{text:{type:'string'},time:{type:'number'},x:{type:'number'},y:{type:'number'}},required:['text']}
         };
