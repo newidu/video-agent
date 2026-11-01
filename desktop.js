@@ -57,28 +57,360 @@
   function injectStudioChrome() {
     const header = document.querySelector('.app > header');
     if (!header || $id('btnProjects')) return;
-    const projectButton = ensureSvgButton('btnProjects', 'Projects',
-      '<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5M9.5 21v-7h5v7"/>');
+    const first = $id('formatSel');
+    const menuButton = ensureSvgButton('btnSidebar', 'Show / hide projects sidebar',
+      '<path d="M4 5h16v14H4z"/><path d="M10 5v14"/>');
+    const projectButton = ensureSvgButton('btnProjects', 'Recent projects',
+      '<path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/>');
     const settingsButton = ensureSvgButton('btnSettings', 'Settings',
-      '<circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2 2.1-2.1 2.1-2.1-1.2-.1-.1a8 8 0 0 1-2 .8l-.1.1-.3 2.4h-3l-.3-2.4-.1-.1a8 8 0 0 1-2-.8l-.1.1-2.1 1.2-2.1-2.1 1.2-2.1.1-.1a8 8 0 0 1-.8-2l-.1-.1L2 12.6v-3l2.4-.3.1-.1a8 8 0 0 1 .8-2L4 5l2.1-2.1 2.1 1.2.1.1a8 8 0 0 1 2-.8l.1-.1.3-2.4h3l.3 2.4.1.1a8 8 0 0 1 2 .8l2.1-1.2L20.4 5l-1.2 2.1-.1.1a8 8 0 0 1 .8 2l2.4.3v3l-2.4.3-.1.1a8 8 0 0 1-.8 2Z"/>');
+      '<circle cx="12" cy="12" r="3"/><path d="m19 15 2 1-2 4-2-1-2 1v2H9v-2l-2-1-2 1-2-4 2-1v-2l-2-1 2-4 2 1 2-1V6h5v2l2 1 2-1 2 4-2 1z"/>');
     const newButton = ensureSvgButton('btnNewProject', 'New project',
       '<path d="M12 5v14M5 12h14"/>');
+    const agentButton = ensureSvgButton('btnAgentToggle', 'Show / hide agent chat',
+      '<path d="M4 5h16v14H4z"/><path d="M4 10h16"/><path d="M9 10v9"/>');
     const shareButton = ensureSvgButton('btnShare', 'Share project',
       '<path d="M12 16V3m-5 5 5-5 5 5"/><path d="M5 13v7h14v-7"/>');
-    const first = $id('formatSel');
+    const title = document.createElement('button');
+    title.id = 'btnProjectName';
+    title.className = 'project-title-button';
+    title.type = 'button';
+    title.title = 'Rename current project';
+    title.textContent = projectName || 'Untitled project';
+    const saveDot = document.createElement('span');
+    saveDot.id = 'saveIndicator';
+    saveDot.className = 'save-indicator';
+    saveDot.title = 'All changes saved';
+    saveDot.setAttribute('aria-label', 'All changes saved');
+    header.insertBefore(menuButton, first);
     header.insertBefore(projectButton, first);
-    header.insertBefore(settingsButton, first);
+    header.insertBefore(title, first);
+    header.insertBefore(saveDot, first);
+    header.insertBefore(agentButton, first);
     header.insertBefore(newButton, first);
     header.insertBefore(shareButton, first);
-    projectButton.onclick = openProjectGallery;
+    header.insertBefore(settingsButton, first);
+    menuButton.onclick = () => {
+      document.body.classList.toggle('sidebar-hidden');
+      persistUiState();
+    };
+    projectButton.onclick = () => {
+      document.body.classList.remove('sidebar-hidden');
+      renderProjectSidebar();
+      $id('projectSearch')?.focus();
+      persistUiState();
+    };
     settingsButton.onclick = () => A.app.openSettings();
-    newButton.onclick = () => createNewProject();
+    newButton.onclick = () => openNewProjectWizard();
+    agentButton.onclick = () => {
+      document.body.classList.toggle('agent-hidden');
+      persistUiState();
+    };
     shareButton.onclick = showShareMenu;
+    title.onclick = () => beginProjectRename();
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     if ($id('btnSave')) $id('btnSave').onclick = saveProject;
-    if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     if ($id('btnReset')) $id('btnReset').style.display = 'none';
+    ['btnMusic','btnMusicOn','btnFont','btnLoad','btnSave','btnPoster'].forEach(id => {
+      if ($id(id)) $id(id).style.display = 'none';
+    });
+    updateProjectTitle();
   }
+
+  function updateProjectTitle() {
+    const button = $id('btnProjectName');
+    if (button) {
+      button.textContent = projectName || 'Untitled project';
+      button.title = projectName ? 'Rename ' + projectName : 'Rename current project';
+    }
+  }
+
+  function beginProjectRename() {
+    const button = $id('btnProjectName');
+    if (!button || !projectId || $id('projectNameEditor')) return;
+    const input = document.createElement('input');
+    input.id = 'projectNameEditor';
+    input.className = 'project-name-editor';
+    input.value = projectName || 'Untitled project';
+    input.maxLength = 100;
+    button.replaceWith(input);
+    input.focus();
+    input.select();
+    let finished = false;
+    const finish = async save => {
+      if (finished) return;
+      finished = true;
+      const value = input.value.trim();
+      if (save && value && value !== projectName) {
+        try {
+          await A.project.rename(projectId, value);
+          projectName = value;
+          status('Renamed · ' + projectName);
+          renderProjectSidebar();
+          scheduleSave();
+        } catch (error) { status('Rename failed · ' + error.message); }
+      }
+      const next = document.createElement('button');
+      next.id = 'btnProjectName';
+      next.className = 'project-title-button';
+      next.type = 'button';
+      next.onclick = beginProjectRename;
+      input.replaceWith(next);
+      updateProjectTitle();
+    };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+      if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  async function persistUiState() {
+    try {
+      await A.ui.save({
+        sidebarHidden: document.body.classList.contains('sidebar-hidden'),
+        agentHidden: document.body.classList.contains('agent-hidden')
+      });
+    } catch (error) { console.warn('Could not save layout state', error); }
+  }
+
+  function installProjectSidebar() {
+    if ($id('aivaSidebar')) return;
+    const aside = document.createElement('aside');
+    aside.id = 'aivaSidebar';
+    aside.innerHTML =
+      '<div class="sidebar-brand"><span class="sidebar-mark">AV</span><span class="sidebar-brand-copy"><strong>Video Agent</strong><small>Studio</small></span>' +
+      '<button id="sidebarCollapse" class="icon" title="Collapse sidebar" aria-label="Collapse sidebar"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M10 5v14"/></svg></button></div>' +
+      '<button id="sidebarNewProject" class="sidebar-new"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>New project</span></button>' +
+      '<div class="sidebar-search"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg>' +
+      '<input id="projectSearch" type="search" placeholder="Find a project…" autocomplete="off"><kbd>Ctrl K</kbd></div>' +
+      '<div class="sidebar-section-head"><span>Recent projects</span><button id="sidebarRefresh" class="icon" title="Refresh projects" aria-label="Refresh projects"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5"/><path d="M4 17v-5h5"/><path d="M6.1 9a7 7 0 0 1 12.1-2L20 12M4 12l1.8 5a7 7 0 0 0 12.1-2"/></svg></button></div>' +
+      '<div id="sidebarProjects" class="sidebar-projects"></div>' +
+      '<div class="sidebar-footer"><button id="sidebarImport" class="sidebar-foot-button" title="Import project"><svg viewBox="0 0 24 24"><path d="M12 15V3m-5 5 5-5 5 5"/><path d="M4 15v5h16v-5"/></svg><span>Import project</span></button>' +
+      '<button id="sidebarSettings" class="sidebar-foot-button" title="Settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19 15 2 1-2 4-2-1-2 1v2H9v-2l-2-1-2 1-2-4 2-1v-2l-2-1 2-4 2 1 2-1V6h5v2l2 1 2-1 2 4-2 1z"/></svg><span>Settings</span></button></div>';
+    const main = document.querySelector('.app main');
+    const agent = $id('agentPane');
+    if (main && agent) main.insertBefore(aside, agent);
+    $id('sidebarNewProject').onclick = openNewProjectWizard;
+    $id('sidebarCollapse').onclick = () => {
+      document.body.classList.add('sidebar-hidden');
+      persistUiState();
+    };
+    $id('sidebarRefresh').onclick = renderProjectSidebar;
+    $id('projectSearch').addEventListener('input', renderProjectSidebar);
+    $id('sidebarImport').onclick = importProjectFile;
+    $id('sidebarSettings').onclick = () => A.app.openSettings();
+    renderProjectSidebar();
+  }
+
+  async function renderProjectSidebar() {
+    const host = $id('sidebarProjects');
+    if (!host) return;
+    host.innerHTML = '<div class="sidebar-empty">Loading projects…</div>';
+    try {
+      const projects = await A.project.list();
+      const query = ($id('projectSearch')?.value || '').trim().toLowerCase();
+      const visible = projects.filter(project => !query || String(project.name).toLowerCase().includes(query));
+      host.innerHTML = '';
+      if (!visible.length) {
+        const empty = document.createElement('div');
+        empty.className = 'sidebar-empty';
+        empty.textContent = query ? 'No matching projects' : 'Your next idea starts here';
+        host.appendChild(empty);
+        return;
+      }
+      visible.forEach(project => {
+        const row = document.createElement('div');
+        row.className = 'sidebar-project-row' + (project.id === projectId ? ' active' : '');
+        const open = document.createElement('button');
+        open.className = 'sidebar-project-open';
+        open.type = 'button';
+        open.title = project.name;
+        open.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 7h7l2 2h7v10H4z"/><path d="M4 7V5h7l2 2"/></svg><span><strong></strong><small></small></span>';
+        open.querySelector('strong').textContent = project.name;
+        const date = project.updatedAt || project.lastOpenedAt || project.createdAt;
+        open.querySelector('small').textContent = date ? new Date(date).toLocaleDateString() : 'Project';
+        open.onclick = () => openProject(project.id);
+        const more = document.createElement('button');
+        more.className = 'sidebar-project-more icon';
+        more.type = 'button';
+        more.title = 'Project actions';
+        more.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>';
+        more.onclick = event => {
+          event.stopPropagation();
+          showProjectActions(project, more);
+        };
+        row.append(open, more);
+        host.appendChild(row);
+      });
+    } catch (error) {
+      host.innerHTML = '<div class="sidebar-empty">Project list unavailable · ' + escapeHtml(error.message) + '</div>';
+    }
+  }
+
+  function showProjectActions(project, anchor) {
+    const old = $id('projectActionMenu');
+    if (old) old.remove();
+    const menu = document.createElement('div');
+    menu.id = 'projectActionMenu';
+    menu.className = 'project-action-menu';
+    menu.innerHTML =
+      '<button data-action="open"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="m9 12 2 2 4-4"/></svg>Open</button>' +
+      '<button data-action="rename"><svg viewBox="0 0 24 24"><path d="m4 16-.8 4.8L8 20l10.8-10.8-4-4z"/></svg>Rename</button>' +
+      '<button data-action="duplicate"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>Duplicate</button>' +
+      '<button data-action="reveal"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/></svg>Show in folder</button>' +
+      '<button data-action="delete" class="danger"><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v7m4-7v7M6 7l1 14h10l1-14M9 7V4h6v3"/></svg>Delete</button>';
+    document.body.appendChild(menu);
+    const rect = anchor?.getBoundingClientRect();
+    menu.style.left = Math.max(12, (rect?.left || 230) - 12) + 'px';
+    menu.style.top = Math.min(window.innerHeight - 230, Math.max(60, rect?.top || 160)) + 'px';
+    menu.querySelectorAll('[data-action]').forEach(button => {
+      button.onclick = async () => {
+        menu.remove();
+        try {
+          const action = button.dataset.action;
+          if (action === 'open') return openProject(project.id);
+          if (action === 'rename') {
+            const value = window.prompt('Project name', project.name);
+            if (value && value.trim()) {
+              await A.project.rename(project.id, value.trim());
+              if (projectId === project.id) { projectName = value.trim(); updateProjectTitle(); }
+            }
+          } else if (action === 'duplicate') {
+            const copy = await A.project.duplicate(project.id);
+            status('Duplicated · ' + copy.name);
+          } else if (action === 'reveal') {
+            await A.project.reveal(project.id);
+          } else if (action === 'delete') {
+            if (!window.confirm('Delete "' + project.name + '"? This cannot be undone.')) return;
+            await A.project.delete(project.id);
+            if (projectId === project.id) {
+              projectId = null;
+              projectName = 'Untitled project';
+              CHAT.length = 0;
+              $id('chat').innerHTML = '';
+            }
+          }
+          renderProjectSidebar();
+        } catch (error) { status('Project action failed · ' + error.message); }
+      };
+    });
+    const close = event => {
+      if (!menu.contains(event.target)) {
+        menu.remove();
+        document.removeEventListener('pointerdown',close,true);
+      }
+    };
+    setTimeout(() => document.addEventListener('pointerdown',close,true),0);
+  }
+
+  async function openNewProjectWizard() {
+    let modal = $id('newProjectWizard');
+    if (modal) { modal.classList.add('open'); $id('newProjectName')?.focus(); return; }
+    modal = document.createElement('div');
+    modal.id = 'newProjectWizard';
+    modal.className = 'new-project-overlay open';
+    modal.innerHTML =
+      '<section class="new-project-dialog" role="dialog" aria-modal="true" aria-labelledby="newProjectTitle">' +
+      '<div class="new-project-head"><div><span class="wizard-kicker">NEW WORKSPACE</span><h2 id="newProjectTitle">Start a project</h2><p>Give your idea a name and choose where it lives.</p></div>' +
+      '<button id="newProjectClose" class="icon" aria-label="Close" title="Close"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>' +
+      '<label class="wizard-field"><span>Project name</span><input id="newProjectName" maxlength="100" placeholder="e.g. Google loading animation" autocomplete="off"></label>' +
+      '<div class="wizard-field"><span>Save location</span><div class="wizard-location"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg><span id="newProjectPath">Choose a folder for this project</span>' +
+      '<button id="newProjectBrowse" class="icon" title="Choose folder" aria-label="Choose folder"><svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 17v4h16v-4"/></svg></button></div>' +
+      '<small id="newProjectPathHint">Projects are saved locally on this computer and can be reopened later.</small></div>' +
+      '<div class="wizard-field"><span>Video format</span><div class="wizard-formats">' +
+      '<button data-format="16:9" class="wizard-format"><span class="format-shape wide"></span><strong>Landscape</strong><small>16:9 · YouTube</small></button>' +
+      '<button data-format="9:16" class="wizard-format selected"><span class="format-shape vertical"></span><strong>Portrait</strong><small>9:16 · Shorts / Reels</small></button>' +
+      '<button data-format="1:1" class="wizard-format"><span class="format-shape square"></span><strong>Square</strong><small>1:1 · Social</small></button></div></div>' +
+      '<div class="new-project-actions"><button id="newProjectCancel" class="icon" title="Cancel">Cancel</button>' +
+      '<button id="newProjectCreate" class="wizard-create" disabled><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span>Create project</span></button></div></section>';
+    document.body.appendChild(modal);
+    let workspace = await A.project.getWorkspaceInfo();
+    let selectedFormat = '9:16';
+    const pathLabel = $id('newProjectPath');
+    const createButton = $id('newProjectCreate');
+    function updatePath() {
+      pathLabel.textContent = workspace.configured ? workspace.root : 'Choose a folder for this project';
+      createButton.disabled = !workspace.configured || !$id('newProjectName').value.trim();
+    }
+    $id('newProjectName').addEventListener('input', updatePath);
+    $id('newProjectBrowse').onclick = async () => {
+      const result = await A.project.chooseRoot();
+      if (!result.canceled) {
+        workspace = { root: result.root, configured: true };
+        updatePath();
+      }
+    };
+    modal.querySelectorAll('[data-format]').forEach(button => {
+      button.onclick = () => {
+        selectedFormat = button.dataset.format;
+        modal.querySelectorAll('[data-format]').forEach(item => item.classList.toggle('selected', item === button));
+      };
+    });
+    const close = () => modal.classList.remove('open');
+    $id('newProjectClose').onclick = close;
+    $id('newProjectCancel').onclick = close;
+    modal.addEventListener('pointerdown', event => { if (event.target === modal) close(); });
+    $id('newProjectCreate').onclick = async () => {
+      const name = $id('newProjectName').value.trim();
+      if (!name || !workspace.configured) return;
+      createButton.disabled = true;
+      try {
+        await createNewProject({ name, format: selectedFormat });
+        modal.classList.remove('open');
+      } catch (error) {
+        status('Could not create project · ' + error.message);
+        createButton.disabled = false;
+      }
+    };
+    updatePath();
+    $id('newProjectName').focus();
+  }
+
+  function installSelectionContext() {
+    const composer = document.querySelector('.composer');
+    if (!composer || $id('selectionContext')) return;
+    const chip = document.createElement('div');
+    chip.id = 'selectionContext';
+    chip.className = 'selection-context';
+    chip.hidden = true;
+    chip.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="M9 9h6v6H9z"/></svg><span id="selectionContextLabel"></span>' +
+      '<button id="selectionContextClear" class="icon" title="Remove selection context" aria-label="Remove selection context"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button>';
+    composer.insertBefore(chip, $id('prompt'));
+    function refreshSelection() {
+      const selected = typeof SELECTED !== 'undefined' ? SELECTED : null;
+      const label = selected ? (typeof labelOf === 'function' ? labelOf(selected) : String(selected)) : '';
+      chip.hidden = !selected;
+      if ($id('selectionContextLabel')) $id('selectionContextLabel').textContent = selected ? 'Selected · ' + label : '';
+    }
+    $id('selectionContextClear').onclick = () => {
+      SELECTED = null;
+      if (typeof drawOverlay === 'function') drawOverlay();
+      if (typeof renderPanel === 'function') renderPanel();
+      refreshSelection();
+    };
+    if ($id('stage')) {
+      $id('stage').addEventListener('pointerup', () => requestAnimationFrame(refreshSelection));
+      $id('stage').addEventListener('dblclick', () => requestAnimationFrame(refreshSelection));
+    }
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') requestAnimationFrame(refreshSelection);
+    });
+    const includeSelection = () => {
+      const selected = typeof SELECTED !== 'undefined' ? SELECTED : null;
+      const input = $id('prompt');
+      if (!selected || !input || !input.value.trim()) return;
+      const label = typeof labelOf === 'function' ? labelOf(selected) : String(selected);
+      if (!input.value.startsWith('Regarding the selected element')) {
+        input.value = 'Regarding the selected video element "' + label + '" (id: ' + selected + '): ' + input.value;
+      }
+    };
+    $id('btnSend')?.addEventListener('click', includeSelection, true);
+    $id('prompt')?.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.shiftKey && (event.ctrlKey || event.metaKey)) includeSelection();
+    }, true);
+    refreshSelection();
+  }
+
 
   function applyAppearance(value) {
     if (!value) return;
