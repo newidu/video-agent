@@ -4567,7 +4567,7 @@ async function sendPrompt() {
 $('btnSend').onclick = sendPrompt;
 $('btnStop').onclick = () => { if (ABORT) ABORT.abort(); agentStatus('Stopped.'); };
 $('prompt').addEventListener('keydown', e => {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); sendPrompt(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPrompt(); }
 });
 
 /* ---------- applying the answer ---------- */
