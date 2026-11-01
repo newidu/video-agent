@@ -340,7 +340,7 @@
     // Never put the key into the DOM, localStorage, or chat history.
     if ($id('apiKey')) $id('apiKey').value = '';
     window.apiKey = () => providerReady ? 'secure-provider-configured' : '';
-    window.apiBase = () => activeProvider ? activeProvider.base_url.replace(/\\/+$/, '') : 'https://api.deepseek.com';
+    window.apiBase = () => activeProvider ? activeProvider.base_url.replace(/\/+$/, '') : 'https://api.deepseek.com';
     if (typeof SECRETS !== 'undefined') {
       SECRETS.get = () => providerReady ? 'secure-provider-configured' : '';
       SECRETS.stored = () => '';
