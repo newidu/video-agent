@@ -600,6 +600,20 @@ ipcMain.handle('share:html', async (_event, input) => {
   if(result.canceled||!result.filePath)return {canceled:true};
   const output=result.filePath.toLowerCase().endsWith('.html')?result.filePath:result.filePath+'.html';
   const playerSource=await fsp.readFile(path.join(ROOT,'engine.player.js'),'utf8');
+  const sceneCode=(project.spec.scenes||[]).flatMap(scene=>(scene.elements||[]).map(element=>String(element.js||''))).join('\n');
+  const needsLottie=Object.keys(project.spec.motionAssets||{}).length>0;
+  const needsThree=/H\\.(?:cube3D|sphere3D)\\s*\\(/.test(sceneCode);
+  const vendorScripts=[];
+  if(needsLottie){
+    const lottiePath=path.join(ROOT,'node_modules','lottie-web','build','player','lottie.js');
+    if(!fs.existsSync(lottiePath))throw new Error('Lottie runtime is missing from this installation.');
+    vendorScripts.push((await fsp.readFile(lottiePath,'utf8')).replace(/<\\/script/gi,'<\\\\/script'));
+  }
+  if(needsThree){
+    const threePath=path.join(ROOT,'assets','three.bundle.js');
+    if(!fs.existsSync(threePath))throw new Error('Three.js renderer bundle is missing. Run the app build before exporting this project.');
+    vendorScripts.push((await fsp.readFile(threePath,'utf8')).replace(/<\\/script/gi,'<\\\\/script'));
+  }
   const safeProject=JSON.stringify(project)
     .replace(/</g,'\\u003c')
     .replace(/\u2028/g,'\\u2028')
@@ -641,6 +655,7 @@ ipcMain.handle('share:html', async (_event, input) => {
     '<select id="speed"><option value=".25">0.25×</option><option value=".5">0.5×</option><option value=".75">0.75×</option><option selected value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>',
     '<input id="volume" type="range" min="0" max="1" step=".01" value=".8" title="Volume"><button id="fullscreen">Fullscreen</button>',
     '</div></main>',
+    ...vendorScripts.map(source=>'<script>'+source+'</script>'),
     '<script>'+safePlayer+'</script>',
     '<script>'+boot+'</script>',
     '</body></html>'
