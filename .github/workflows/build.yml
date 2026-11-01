@@ -24,11 +24,11 @@ jobs:
         run: npm install
       - name: Syntax and unit checks
         run: npm test
-      - name: Build NSIS installer and portable EXE
+      - name: Build unsigned NSIS installer and portable EXE
         run: npm run dist:win
         env:
-          WIN_CSC_LINK: \${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: \${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        env:
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
