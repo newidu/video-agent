@@ -1814,7 +1814,7 @@
           '<input type="checkbox" checked disabled title="Bundled FFmpeg is enabled by default">') +
         settingRow('Motion code library','Reusable canvas-code presets and agent-authored motion graphics.',
           '<input id="intMotionLibrary" type="checkbox"' + (info.motionLibrary !== false?' checked':'') + '>') +
-        '<div class="setting-actions"><button id="saveIntegrations" class="primary">Save integration switches</button></div>');
+        '<div class="setting-actions"><button id="saveIntegrations" class="primary">Save integration switches</button></div>')];
     $id('settingsContent').innerHTML = cards;
 
     async function test(kind) {
