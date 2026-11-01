@@ -1340,7 +1340,7 @@
     document.body.appendChild(menu);
     $id('shareAivp').onclick = async () => {
       try {
-        if (!projectId) await createNewProject((SPEC && SPEC.title) || 'Untitled project');
+        if (!projectId) { menu.remove(); await openNewProjectWizard(); return; }
         await persistNow();
         const result = await A.project.exportBundle(currentProjectData());
         menu.remove();
@@ -1349,7 +1349,7 @@
     };
     $id('shareHtml').onclick = async () => {
       try {
-        if (!projectId) await createNewProject((SPEC && SPEC.title) || 'Untitled project');
+        if (!projectId) { menu.remove(); await openNewProjectWizard(); return; }
         await persistNow();
         const result = await A.project.exportHtml(currentProjectData());
         menu.remove();
