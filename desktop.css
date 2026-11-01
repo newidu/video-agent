@@ -571,3 +571,69 @@ html[data-view="settings"] .settings-top h1{color:var(--ink)}
 #editPane.is-open{animation:aivaPanelIn .16s ease-out}
 @keyframes aivaPanelIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:680px){.motion-presets{grid-template-columns:1fr}}
+
+
+
+/* Settings inherits the active theme tokens instead of forcing a light-only panel. */
+html[data-view="settings"] body{background:transparent!important;color:var(--ink)}
+html[data-view="settings"] .settings-shell{
+  background:color-mix(in srgb,var(--paper) 82%,transparent);
+  color:var(--ink);
+  backdrop-filter:blur(28px);
+  -webkit-backdrop-filter:blur(28px)
+}
+html[data-view="settings"] .settings-rail{
+  background:color-mix(in srgb,var(--rail) 86%,transparent);
+  border-right:1px solid var(--line)
+}
+html[data-view="settings"] .settings-main{background:transparent;color:var(--ink)}
+html[data-view="settings"] .settings-top{border-bottom-color:var(--line)}
+html[data-view="settings"] .settings-top h1{color:var(--ink)}
+html[data-view="settings"] .settings-nav{color:var(--muted)}
+html[data-view="settings"] .settings-nav:hover{background:var(--paper-2);color:var(--ink)}
+html[data-view="settings"] .settings-nav.active{
+  background:var(--paper-2);color:var(--ink);
+  box-shadow:inset 2px 0 var(--accent)
+}
+html[data-view="settings"] .settings-brand{color:var(--ink)}
+html[data-view="settings"] .settings-brand small{color:var(--muted)}
+html[data-view="settings"] .settings-card{
+  background:color-mix(in srgb,var(--paper) 82%,transparent);
+  border-color:var(--line);color:var(--ink);
+  box-shadow:var(--shadow)
+}
+html[data-view="settings"] .settings-card h2{color:var(--ink)}
+html[data-view="settings"] .settings-card p,
+html[data-view="settings"] .settings-note,
+html[data-view="settings"] .settings-status{color:var(--muted)}
+html[data-view="settings"] .setting-row{border-color:var(--line);color:var(--ink)}
+html[data-view="settings"] .setting-row label{color:var(--ink)}
+html[data-view="settings"] .setting-row small{color:var(--muted)}
+html[data-view="settings"] .settings-list-row{border-color:var(--line)}
+html[data-view="settings"] .settings-list-row strong{color:var(--ink)}
+html[data-view="settings"] .settings-list-row small{color:var(--muted)}
+html[data-view="settings"] input,
+html[data-view="settings"] textarea,
+html[data-view="settings"] select{
+  background:var(--paper);color:var(--ink);border-color:var(--line)
+}
+html[data-view="settings"] input:focus,
+html[data-view="settings"] textarea:focus,
+html[data-view="settings"] select:focus{
+  outline-color:var(--accent);border-color:var(--accent)
+}
+html[data-view="settings"] .motion-preset,
+html[data-view="settings"] .settings-card button{
+  background:var(--paper-2);color:var(--ink);border-color:var(--line)
+}
+html[data-view="settings"] .motion-preset:hover,
+html[data-view="settings"] .settings-card button:hover{border-color:var(--accent)}
+html[data-view="settings"] .settings-card button.primary{
+  background:var(--ink);color:var(--paper);border-color:var(--ink)
+}
+html[data-view="settings"] .integration-status{color:var(--muted)}
+html[data-view="settings"] [data-theme="dark"]{color-scheme:dark}
+@media(max-width:760px){
+  html[data-view="settings"] .settings-shell{grid-template-columns:145px minmax(0,1fr)}
+  html[data-view="settings"] .settings-main{padding:16px 14px}
+}
