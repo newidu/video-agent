@@ -2162,31 +2162,49 @@
     };
   }
 
-  function renderMotionLibrary() {
+  async function renderMotionLibrary() {
     const presets=[
       ['Minimal title reveal','Soft fade and upward motion for a clean title.'],
       ['Kinetic typography','Word-by-word scale, stagger and settle.'],
       ['Product spotlight','Radial focus, orbiting accents and controlled highlights.'],
       ['Data / infographic','Animated bars, counters and callout lines.'],
       ['Logo sting','Short geometric reveal for a supplied brand mark.'],
-      ['Depth / parallax','Layered motion with scale and perspective-like canvas transforms.']
+      ['Depth / parallax','Layered motion with scale and perspective-like canvas transforms.'],
+      ['3D cube','Rotating Three.js 3D cube rendered into a native video code element.'],
+      ['3D sphere','Animated Three.js sphere rendered into a native video code element.']
     ];
+    let saved=[];
+    try{saved=await A.motion.list();}catch(error){settingsStatus('Motion library could not be loaded · '+error.message,false);}
+    const savedRows=saved.length?saved.map(item=>
+      '<div class="settings-list-row"><div><strong>'+escapeHtml(item.name)+'</strong><small>'+escapeHtml(item.description||item.type||'Saved motion')+' · '+escapeHtml(item.type||'code')+'</small></div><button data-motion-use="'+escapeHtml(item.id)+'">Use</button><button data-motion-delete="'+escapeHtml(item.id)+'" title="Delete saved motion">×</button></div>'
+    ).join(''):'<p class="settings-note">No custom motion assets yet. Save a code preset or import a Lottie JSON animation.</p>';
     $id('settingsContent').innerHTML =
-      settingCard('Code-based motion system','The agent builds directly with the existing JavaScript canvas code elements. These are editable starting points, not locked templates.',
+      settingCard('Reusable canvas motion','Built-in and saved effects become editable code elements in your video. Three.js effects use the bundled renderer; Lottie imports keep their animation JSON with the project.', 
         '<div class="motion-presets">' + presets.map((item,index)=>
           '<button class="motion-preset" data-motion-preset="'+index+'"><strong>'+escapeHtml(item[0])+'</strong><small>'+escapeHtml(item[1])+'</small></button>'
         ).join('') + '</div>') +
-      settingCard('Starter templates','Choose a structure, then ask the agent to rewrite every scene.',
-        '<div class="motion-presets"><button class="motion-preset" data-template="youtube-intro"><strong>YouTube intro</strong><small>Hook · channel identity · CTA</small></button>' +
-        '<button class="motion-preset" data-template="instagram-story"><strong>Instagram Story</strong><small>Vertical hook · story · CTA</small></button>' +
-        '<button class="motion-preset" data-template="product-demo"><strong>Product demo</strong><small>Problem · product · proof · action</small></button></div>') +
-      settingCard('Advanced motion support','Canvas code may generate procedural 2D / pseudo-3D motion using JavaScript. Lottie JSON and full WebGL / Three.js scene import are not enabled in this build yet.',
-        '<p class="settings-note">Use code elements for reusable HTML/CSS/JS-inspired motion designs. A Lottie or Three.js import requires a dedicated renderer integration, not just an API key.</p>');
+      settingCard('Save your own motion code','Write a deterministic JavaScript function using ctx, e, H, t, dur, w and h. It runs inside the existing selectable canvas-code element.',
+        '<label class="field">Preset name<input id="motionName" maxlength="80" placeholder="e.g. Brand logo reveal"></label>'+
+        '<label class="field">Description<input id="motionDescription" maxlength="180" placeholder="What this motion does"></label>'+
+        '<label class="field">JavaScript code<textarea id="motionCode" rows="7" spellcheck="false" placeholder="ctx.save();\\nH.circle(0,0,Math.min(w,h)*0.2);\\nH.stroke(()=>H.circle(0,0,Math.min(w,h)*0.2), e.color || \\'#C65A2E\\', 4);\\nctx.restore();"></textarea></label>'+
+        '<div class="setting-actions"><button id="saveMotionCode" class="primary">Save motion preset</button></div>') +
+      settingCard('Import Lottie animation','Import a .json Lottie Bodymovin animation. The JSON is validated and stored in the local motion library; the agent can add it as a time-seekable animation.',
+        '<label class="field">Animation name<input id="lottieName" maxlength="80" placeholder="e.g. Animated logo"></label>'+
+        '<label class="field">Description<input id="lottieDescription" maxlength="180" placeholder="Optional description"></label>'+
+        '<label class="field">Lottie JSON file<input id="lottieFile" type="file" accept=".json,application/json"></label>'+
+        '<div class="setting-actions"><button id="importLottie" class="primary">Import Lottie JSON</button><span id="lottieStatus" class="integration-status"></span></div>')+
+      settingCard('My saved motion library','These assets are available in the agent tool list and can be reused in any project.', '<div class="settings-list">'+savedRows+'</div>')+
+      settingCard('Starter video structures','Choose a structure, then ask the agent to rewrite every scene. These are scaffolds, not locked templates.',
+        '<div class="motion-presets"><button class="motion-preset" data-template="youtube-intro"><strong>YouTube intro</strong><small>Hook · channel identity · CTA</small></button>'+
+        '<button class="motion-preset" data-template="instagram-story"><strong>Instagram Story</strong><small>Vertical hook · story · CTA</small></button>'+
+        '<button class="motion-preset" data-template="product-demo"><strong>Product demo</strong><small>Problem · product · proof · action</small></button></div>')+
+      settingCard('Renderer support','Canvas code supports deterministic 2D effects, imported Lottie, and reusable Three.js cube / sphere helpers. Full arbitrary HTML scene embedding and HyperFrames CLI import are not enabled.',
+        '<p class="settings-note">Use native code elements for animation you want the agent to edit. Lottie and Three.js assets are rendered through the app’s canvas bridge and included with editable project data.</p>');
     document.querySelectorAll('[data-motion-preset]').forEach(button=>{
       button.onclick=()=>{
         const item=presets[Number(button.dataset.motionPreset)];
         if($id('prompt'))$id('prompt').value='Create an editable motion-graphics sequence using the '+item[0]+' direction. '+item[1]+' Use native code elements and keep every part selectable.';
-        if(view==='settings')status('Motion direction copied to the Studio composer.');
+        settingsStatus('Motion direction copied to the Studio composer.',true);
       };
     });
     document.querySelectorAll('[data-template]').forEach(button=>{
@@ -2199,8 +2217,52 @@
         settingsStatus('Template brief is ready in the Studio composer.',true);
       };
     });
+    $id('saveMotionCode').onclick=async()=>{
+      try{
+        const saved=await A.motion.save({
+          name:$id('motionName').value.trim(),
+          description:$id('motionDescription').value.trim(),
+          js:$id('motionCode').value
+        });
+        settingsStatus('Saved motion preset · '+saved.name,true);
+        renderMotionLibrary();
+      }catch(error){settingsStatus(error.message,false);}
+    };
+    $id('importLottie').onclick=async()=>{
+      const button=$id('importLottie');button.disabled=true;
+      try{
+        const file=$id('lottieFile').files && $id('lottieFile').files[0];
+        if(!file)throw new Error('Choose a Lottie JSON file first.');
+        if(file.size>10*1024*1024)throw new Error('Lottie JSON exceeds the 10 MB limit.');
+        const raw=await file.text();
+        let animationData;
+        try{animationData=JSON.parse(raw);}catch(error){throw new Error('The selected file is not valid JSON.');}
+        const imported=await A.motion.saveLottie({
+          name:$id('lottieName').value.trim()||file.name.replace(/\\.json$/i,''),
+          description:$id('lottieDescription').value.trim(),
+          animationData
+        });
+        $id('lottieStatus').textContent='Imported · '+imported.name;
+        settingsStatus('Lottie animation imported. The agent can now use it.',true);
+        renderMotionLibrary();
+      }catch(error){settingsStatus(error.message,false);}
+      finally{button.disabled=false;}
+    };
+    document.querySelectorAll('[data-motion-use]').forEach(button=>{
+      button.onclick=()=>{
+        const id=button.dataset.motionUse;
+        if($id('prompt'))$id('prompt').value='Use the saved motion preset with id "'+id+'" in a suitable scene. Keep the result editable and match my Brand Kit.';
+        settingsStatus('Motion preset selected for the agent. Open the Studio composer to send the instruction.',true);
+      };
+    });
+    document.querySelectorAll('[data-motion-delete]').forEach(button=>{
+      button.onclick=async()=>{
+        if(!confirm('Delete this saved motion preset?'))return;
+        try{await A.motion.remove(button.dataset.motionDelete);settingsStatus('Motion preset deleted.',true);renderMotionLibrary();}
+        catch(error){settingsStatus(error.message,false);}
+      };
+    });
   }
-
 
   function renderMusicSettings() {
     const music = settingsData.music || {};
