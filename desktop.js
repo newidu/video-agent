@@ -1522,10 +1522,47 @@
             status('Rendering frames · ' + Math.round((progress.value || 0) * 100) + '%');
           }
         });
+        async function seekSourceVideoFrame(projectTime) {
+          const scene=(window.SCENES||[]).find(item=>projectTime>=item.in && projectTime<item.out);
+          const video=window.MEDIA && window.MEDIA.video;
+          if(!scene || !scene.spec || !scene.spec.media || !video || !window.MEDIA.ready) {
+            if(window.MEDIA && window.MEDIA.video && (!scene || !scene.spec || !scene.spec.media)) {
+              try{window.MEDIA.video.pause();window.MEDIA.scene=null;}catch(error){}
+            }
+            setTime(projectTime);
+            await new Promise(resolve=>requestAnimationFrame(()=>resolve()));
+            return;
+          }
+          const localTime=projectTime-scene.in;
+          const sourceTime=typeof window.sourceTimeForMedia==='function'
+            ? window.sourceTimeForMedia(scene.spec.media,localTime)
+            : Math.max(0,localTime);
+          try{video.pause();}catch(error){}
+          if(Math.abs((video.currentTime||0)-sourceTime)>0.015) {
+            await new Promise((resolve,reject)=>{
+              let settled=false;
+              const finish=error=>{
+                if(settled)return;settled=true;
+                clearTimeout(timer);video.removeEventListener('seeked',onSeeked);
+                video.removeEventListener('error',onError);
+                if(error)reject(error);else resolve();
+              };
+              const onSeeked=()=>finish();
+              const onError=()=>finish(new Error('The source video could not decode a frame at '+sourceTime.toFixed(2)+'s.'));
+              const timer=setTimeout(()=>finish(new Error('Timed out while decoding source video frame '+sourceTime.toFixed(2)+'s.')),2500);
+              video.addEventListener('seeked',onSeeked,{once:true});
+              video.addEventListener('error',onError,{once:true});
+              try{video.currentTime=sourceTime;}catch(error){finish(error);}
+            });
+          }
+          window.MEDIA.scene=scene.id;
+          setTime(projectTime);
+          await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+        }
         for (let index = 0; index < frameCount; index++) {
           if (window.EXPORT_CANCEL) throw new Error('Export cancelled.');
           const frameTime = index / fps;
-          setTime(frameTime);
+          await seekSourceVideoFrame(frameTime);
           renderFrame(frameTime);
           const dataUrl = stage.toDataURL('image/jpeg',0.9);
           await A.export.writeFrame(session.id,index,dataUrl);
@@ -1552,6 +1589,7 @@
         if (unlisten) unlisten();
         activeExportId = null;
         window.__EXPORTING = false;
+        window.EXPORT_MODE = false;
         window.EXPORT_CANCEL = false;
         setLocked(false);
         if ($id('btnStop')) $id('btnStop').textContent = 'Stop';
