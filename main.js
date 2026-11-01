@@ -783,21 +783,58 @@ function normaliseIntegrationUrl(value, label) {
   return parsed.toString().replace(/\/+$/, '');
 }
 
+function makeSilentTestWav() {
+  const sampleRate=16000;
+  const sampleCount=Math.floor(sampleRate*0.5);
+  const dataBytes=sampleCount*2;
+  const wav=Buffer.alloc(44+dataBytes);
+  wav.write('RIFF',0);wav.writeUInt32LE(36+dataBytes,4);wav.write('WAVE',8);
+  wav.write('fmt ',12);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);
+  wav.writeUInt16LE(1,22);wav.writeUInt32LE(sampleRate,24);
+  wav.writeUInt32LE(sampleRate*2,28);wav.writeUInt16LE(2,32);
+  wav.writeUInt16LE(16,34);wav.write('data',36);wav.writeUInt32LE(dataBytes,40);
+  return wav;
+}
+
 async function testIntegrationEndpoint(kind, config, apiKey) {
-  const endpoint = normaliseIntegrationUrl(config.base_url, kind === 'tts' ? 'TTS' : 'Captions') + '/models';
-  const response = await fetch(endpoint, {
-    method: 'GET',
-    headers: { Authorization: 'Bearer ' + apiKey, Accept: 'application/json' },
-    signal: AbortSignal.timeout(30000)
+  const base=normaliseIntegrationUrl(config.base_url,kind==='tts'?'TTS':'Captions');
+  if(kind==='tts'){
+    const response=await fetch(base+'/audio/speech',{
+      method:'POST',
+      headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:String(config.model||'tts-1'),
+        voice:String(config.voice||'alloy'),
+        input:'This is a short voice test.',
+        response_format:'mp3'
+      }),
+      signal:AbortSignal.timeout(60000)
+    });
+    if(!response.ok)throw new Error('TTS API test failed · HTTP '+response.status+' · '+(await response.text()).slice(0,300));
+    const bytes=Buffer.from(await response.arrayBuffer());
+    if(bytes.length<256)throw new Error('TTS API returned an empty or invalid audio response.');
+    return {connected:true,models:[],testedBytes:bytes.length};
+  }
+  const wav=makeSilentTestWav();
+  const form=new FormData();
+  form.append('file',new Blob([wav],{type:'audio/wav'}),'aiva-api-test.wav');
+  form.append('model',String(config.model||'whisper-1'));
+  form.append('response_format','verbose_json');
+  form.append('timestamp_granularities[]','segment');
+  const response=await fetch(base+'/audio/transcriptions',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+apiKey},
+    body:form,
+    signal:AbortSignal.timeout(60000)
   });
-  const body = await response.text();
-  if (!response.ok) throw new Error(kind + ' API test failed · HTTP ' + response.status + ' · ' + body.slice(0, 240));
-  let models = [];
-  try {
-    const parsed = JSON.parse(body);
-    models = Array.isArray(parsed.data) ? parsed.data.map(item => item.id).filter(Boolean) : [];
-  } catch {}
-  return { connected: true, models: models.slice(0, 60) };
+  const raw=await response.text();
+  if(!response.ok)throw new Error('Captions API test failed · HTTP '+response.status+' · '+raw.slice(0,300));
+  let parsed;
+  try{parsed=JSON.parse(raw);}catch{throw new Error('Captions test did not return valid verbose_json transcription data.');}
+  if(!parsed || (typeof parsed.text!=='string' && !Array.isArray(parsed.segments))) {
+    throw new Error('Captions API does not support the required verbose_json timestamp response.');
+  }
+  return {connected:true,models:[],tested:true};
 }
 
 function runFfmpeg(binary, args, timeoutMs = 120000) {
