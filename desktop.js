@@ -368,7 +368,13 @@
       '<div class="wizard-field"><span>Save location</span><div class="wizard-location"><svg viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg><span id="newProjectPath">Choose a folder for this project</span>' +
       '<button id="newProjectBrowse" class="icon" title="Choose folder" aria-label="Choose folder"><svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 17v4h16v-4"/></svg></button></div>' +
       '<small id="newProjectPathHint">Projects are saved locally on this computer and can be reopened later.</small></div>' +
-      '<div class="wizard-field"><span>Video format</span><div class="wizard-formats">' +
+      '<div class="wizard-field"><span>Starter structure</span><div class="wizard-formats wizard-templates">' +
+      '<button data-template="blank" class="wizard-format selected"><strong>Blank</strong><small>Build from scratch</small></button>' +
+      '<button data-template="youtube-intro" class="wizard-format"><strong>YouTube intro</strong><small>Hook · logo · CTA</small></button>' +
+      '<button data-template="instagram-story" class="wizard-format"><strong>Instagram Story</strong><small>Vertical story</small></button>' +
+      '<button data-template="product-demo" class="wizard-format"><strong>Product demo</strong><small>Problem · proof · CTA</small></button>' +
+      '</div></div>' +
+      '<div class="wizard-field"><span>Video format</span><div class="wizard-formats">'
       '<button data-format="16:9" class="wizard-format"><span class="format-shape wide"></span><strong>Landscape</strong><small>16:9 · YouTube</small></button>' +
       '<button data-format="9:16" class="wizard-format selected"><span class="format-shape vertical"></span><strong>Portrait</strong><small>9:16 · Shorts / Reels</small></button>' +
       '<button data-format="1:1" class="wizard-format"><span class="format-shape square"></span><strong>Square</strong><small>1:1 · Social</small></button></div></div>' +
@@ -377,6 +383,7 @@
     document.body.appendChild(modal);
     let workspace = await A.project.getWorkspaceInfo();
     let selectedFormat = '9:16';
+    let selectedTemplate = 'blank';
     const pathLabel = $id('newProjectPath');
     const createButton = $id('newProjectCreate');
     function updatePath() {
@@ -397,6 +404,12 @@
         modal.querySelectorAll('[data-format]').forEach(item => item.classList.toggle('selected', item === button));
       };
     });
+    modal.querySelectorAll('[data-template]').forEach(button => {
+      button.onclick = () => {
+        selectedTemplate = button.dataset.template;
+        modal.querySelectorAll('[data-template]').forEach(item => item.classList.toggle('selected', item === button));
+      };
+    });
     const close = () => modal.classList.remove('open');
     $id('newProjectClose').onclick = close;
     $id('newProjectCancel').onclick = close;
@@ -406,7 +419,7 @@
       if (!name || !workspace.configured) return;
       createButton.disabled = true;
       try {
-        await createNewProject({ name, format: selectedFormat });
+        await createNewProject({ name, format: selectedFormat, template: selectedTemplate });
         modal.classList.remove('open');
       } catch (error) {
         status('Could not create project · ' + error.message);
