@@ -919,7 +919,13 @@ async function makeTranscription(filePath, language = 'auto') {
 }
 
 ipcMain.handle('settings:get', () => ({
-  appearance: readConfig('theme', { mode: 'light', accent: '#C65A2E', bg:'#F7F6F3', paper:'#FFFFFF', ink:'#171614', fontScale: 100, density: 'comfortable', reduceMotion: false, windowMaterial: 'mica' }),
+  appearance: readConfig('theme', {
+    mode:'light',accent:'#C65A2E',bg:'#F7F6F3',paper:'#FFFFFF',paper2:'#F0EFEB',
+    ink:'#171614',ink2:'#45423E',muted:'#85817B',line:'#E5E2DC',line2:'#D4D0C8',
+    rail:'#FBFAF8',railInk:'#171614',fontUi:'Inter, Segoe UI, system-ui, sans-serif',
+    fontMono:'Geist Mono, Consolas, monospace',fontScale:100,density:'comfortable',
+    reduceMotion:false,windowMaterial:'mica'
+  }),
   tools: readConfig('tools', { state: { get_project: 'on', replace_spec: 'on', verify_video: 'on', add_text: 'on', set_background: 'on', set_format: 'lazy', remove_element: 'lazy', critique: 'lazy' }, options: {} }),
   integrations: getIntegrationsConfig(),
   brandKit: readConfig('brand', { name:'',primary:'#171614',secondary:'#F7F6F3',accent:'#C65A2E',headingFont:'Inter',bodyFont:'Inter',logoDataUrl:'',logoPosition:'bottom-right',useLogo:true }),
@@ -937,6 +943,15 @@ ipcMain.handle('settings:save-appearance', async (_event, value) => {
     bg: validColor(value.bg, '#F7F6F3'),
     paper: validColor(value.paper, '#FFFFFF'),
     ink: validColor(value.ink, '#171614'),
+    paper2:validColor(value.paper2,'#F0EFEB'),
+    ink2:validColor(value.ink2,'#45423E'),
+    muted:validColor(value.muted,'#85817B'),
+    line:validColor(value.line,'#E5E2DC'),
+    line2:validColor(value.line2,'#D4D0C8'),
+    rail:validColor(value.rail,'#FBFAF8'),
+    railInk:validColor(value.railInk,'#171614'),
+    fontUi:/^[\\w\\s,'"-]{1,100}$/.test(String(value.fontUi||'')) ? String(value.fontUi).trim() : 'Inter, Segoe UI, system-ui, sans-serif',
+    fontMono:/^[\\w\\s,'"-]{1,100}$/.test(String(value.fontMono||'')) ? String(value.fontMono).trim() : 'Geist Mono, Consolas, monospace',
     fontScale: [100, 110, 125].includes(Number(value.fontScale)) ? Number(value.fontScale) : 100,
     density: value.density === 'compact' ? 'compact' : 'comfortable',
     reduceMotion: Boolean(value.reduceMotion),
