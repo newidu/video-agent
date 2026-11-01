@@ -87,8 +87,6 @@
       '<path d="M12 16V3m-5 5 5-5 5 5"/><path d="M5 13v7h14v-7"/>');
     const historyButton = ensureSvgButton('btnVersionHistory', 'Version history',
       '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>');
-    const historyButton = ensureSvgButton('btnVersionHistory', 'Version history',
-      '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>');
     const title = document.createElement('button');
     title.id = 'btnProjectName';
     title.className = 'project-title-button';
