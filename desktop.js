@@ -971,7 +971,7 @@
     };
     $id('btnSend')?.addEventListener('click', includeSelection, true);
     $id('prompt')?.addEventListener('keydown', event => {
-      if (event.key === 'Enter' && !event.shiftKey && (event.ctrlKey || event.metaKey)) includeSelection();
+      if (event.key === 'Enter' && !event.shiftKey) includeSelection();
     }, true);
     refreshSelection();
   }
@@ -1640,7 +1640,10 @@
       window.EXPORT_CANCEL = false;
       pause();
       setLocked(true);
-      if ($id('btnStop')) $id('btnStop').textContent = 'Cancel export';
+      if ($id('btnStop')) {
+        $id('btnStop').innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+        $id('btnStop').title = 'Cancel export';
+      }
       try {
         const musicData = MUSIC && MUSIC.on !== false && MUSIC.dataUrl ? MUSIC.dataUrl : null;
         const mediaScene=(SPEC.scenes||[]).find(scene=>scene.media);
@@ -1733,7 +1736,10 @@
         window.EXPORT_MODE = false;
         window.EXPORT_CANCEL = false;
         setLocked(false);
-        if ($id('btnStop')) $id('btnStop').textContent = 'Stop';
+        if ($id('btnStop')) {
+          $id('btnStop').innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+          $id('btnStop').title = 'Stop agent';
+        }
         setTime(Math.min(originalTime,DUR));
         if (resumePlayback) play();
       }
