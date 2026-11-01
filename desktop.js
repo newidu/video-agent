@@ -537,6 +537,108 @@
     if ($id('btnPoster')) $id('btnPoster').onclick = window.exportPoster;
   }
 
+  let activeExportId = null;
+  function installVideoExport() {
+    const previousExport = window.exportVideo;
+    window.exportVideo = async function () {
+      if (!ffmpegAvailable) {
+        status('FFmpeg is not available in this installation. MP4 export is disabled.');
+        return;
+      }
+      if (!SPEC.scenes || !SPEC.scenes.length) {
+        status('Nothing to export yet · Ask the agent to build a video first.');
+        return;
+      }
+      if (window.__EXPORTING) return;
+      const fps = Math.max(12, Math.min(60, Number(SPEC.fps) || 30));
+      const duration = Math.max(1, Math.min(120, Number(DUR) || 15));
+      const frameCount = Math.ceil(fps * duration);
+      if (frameCount > 7200) {
+        status('Export duration exceeds the 120-second limit.');
+        return;
+      }
+      const originalTime = Number(time) || 0;
+      const resumePlayback = !!playing;
+      const buttons = ['btnExport','btnPoster','btnPlay','btnStart','btnSave','btnLoad','btnReset','btnNewProject','btnProjects'];
+      const setLocked = locked => buttons.forEach(id => {
+        const el = $id(id);
+        if (el) el.disabled = locked;
+      });
+      let unlisten = null;
+      window.__EXPORTING = true;
+      window.EXPORT_CANCEL = false;
+      pause();
+      setLocked(true);
+      if ($id('btnStop')) $id('btnStop').textContent = 'Cancel export';
+      try {
+        const musicData = MUSIC && MUSIC.on !== false && MUSIC.dataUrl ? MUSIC.dataUrl : null;
+        const session = await A.export.begin({
+          fps:fps,duration:duration,ext:'jpg',
+          audioDataUrl:musicData,
+          audioVolume:MUSIC && MUSIC.volume != null ? MUSIC.volume : 0.8
+        });
+        activeExportId = session.id;
+        unlisten = A.export.onProgress(progress => {
+          if (progress.phase === 'encoding') {
+            status('Encoding MP4 · ' + Math.round((progress.value || 0) * 100) + '%');
+          } else if (progress.phase === 'done') {
+            status('Finalizing MP4…');
+          } else {
+            status('Rendering frames · ' + Math.round((progress.value || 0) * 100) + '%');
+          }
+        });
+        for (let index = 0; index < frameCount; index++) {
+          if (window.EXPORT_CANCEL) throw new Error('Export cancelled.');
+          const frameTime = index / fps;
+          setTime(frameTime);
+          renderFrame(frameTime);
+          const dataUrl = stage.toDataURL('image/jpeg',0.9);
+          await A.export.writeFrame(session.id,index,dataUrl);
+          if (index % 4 === 0) {
+            status('Rendering frames · ' + Math.round(((index + 1) / frameCount) * 100) + '%');
+            await new Promise(resolve => setTimeout(resolve,0));
+          }
+        }
+        if (window.EXPORT_CANCEL) throw new Error('Export cancelled.');
+        const result = await A.export.finish(session.id);
+        activeExportId = null;
+        if (result && result.saved) {
+          status('Saved · ' + result.path + ' · ' + (result.bytes / 1048576).toFixed(1) + ' MB');
+        } else {
+          status('Export cancelled.');
+        }
+      } catch (error) {
+        if (activeExportId) {
+          await A.export.cancel(activeExportId).catch(() => {});
+          activeExportId = null;
+        }
+        status((error && error.message) || 'MP4 export failed.');
+      } finally {
+        if (unlisten) unlisten();
+        activeExportId = null;
+        window.__EXPORTING = false;
+        window.EXPORT_CANCEL = false;
+        setLocked(false);
+        if ($id('btnStop')) $id('btnStop').textContent = 'Stop';
+        setTime(Math.min(originalTime,DUR));
+        if (resumePlayback) play();
+      }
+    };
+    if ($id('btnExport')) $id('btnExport').onclick = window.exportVideo;
+    if ($id('btnStop')) {
+      const originalStop = $id('btnStop').onclick;
+      $id('btnStop').onclick = function () {
+        if (window.__EXPORTING) {
+          window.EXPORT_CANCEL = true;
+          if (activeExportId) A.export.cancel(activeExportId).catch(() => {});
+          status('Cancelling export…');
+          return;
+        }
+        if (typeof originalStop === 'function') originalStop.apply(this,arguments);
+      };
+    }
+  }
+
   function createSettingsMarkup() {
     if ($id('settingsShell')) return;
     const shell = document.createElement('div');
@@ -860,6 +962,7 @@
     installToolPolicy();
     installPlayerControls();
     installPosterExport();
+    installVideoExport();
     if ($id('btnSave')) $id('btnSave').onclick = saveProject;
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     try {
