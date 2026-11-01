@@ -83,6 +83,8 @@
       '<path d="M4 5h16v14H4z"/><path d="M4 10h16"/><path d="M9 10v9"/>');
     const shareButton = ensureSvgButton('btnShare', 'Share project',
       '<path d="M12 16V3m-5 5 5-5 5 5"/><path d="M5 13v7h14v-7"/>');
+    const historyButton = ensureSvgButton('btnVersionHistory', 'Version history',
+      '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>');
     const title = document.createElement('button');
     title.id = 'btnProjectName';
     title.className = 'project-title-button';
@@ -101,6 +103,7 @@
     header.insertBefore(agentButton, first);
     header.insertBefore(newButton, first);
     header.insertBefore(shareButton, first);
+    header.insertBefore(historyButton, first);
     header.insertBefore(settingsButton, first);
     menuButton.onclick = () => {
       document.body.classList.toggle('sidebar-hidden');
@@ -119,6 +122,7 @@
       persistUiState();
     };
     shareButton.onclick = showShareMenu;
+    historyButton.onclick = openVersionHistory;
     title.onclick = () => beginProjectRename();
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     if ($id('btnSave')) $id('btnSave').onclick = saveProject;
@@ -661,6 +665,154 @@
       };
       wrapped.__aivaBrandOverlay=true;window.renderFrame=wrapped;
     }
+  }
+
+  async function openVersionHistory() {
+    if (!projectId) { status('Create or open a project first.'); return; }
+    let modal=$id('versionHistoryModal');
+    if(modal){modal.remove();return;}
+    modal=document.createElement('div');
+    modal.id='versionHistoryModal';
+    modal.className='aiva-modal-backdrop';
+    modal.innerHTML='<section class="aiva-modal"><header><div><strong>Version history</strong><small>Restore a previous AI iteration or create a checkpoint.</small></div><button id="closeVersionHistory" class="icon" title="Close">×</button></header><div class="version-actions"><button id="createVersionNow" class="primary">Create checkpoint</button></div><div id="versionList" class="version-list">Loading versions…</div></section>';
+    document.body.appendChild(modal);
+    $id('closeVersionHistory').onclick=()=>modal.remove();
+    modal.addEventListener('pointerdown',event=>{if(event.target===modal)modal.remove();});
+    $id('createVersionNow').onclick=async()=>{
+      try{
+        await persistNow();
+        await A.project.createVersion(projectId,'Manual checkpoint',currentProjectData());
+        await loadVersions();
+        settingsStatus('Checkpoint saved',true);
+      }catch(error){status('Version save failed · '+error.message);}
+    };
+    async function loadVersions(){
+      const list=await A.project.listVersions(projectId);
+      const host=$id('versionList');
+      host.innerHTML='';
+      if(!list.length){host.innerHTML='<div class="history-empty">No saved versions yet. Versions are created after successful agent edits.</div>';return;}
+      list.forEach(version=>{
+        const row=document.createElement('div');
+        row.className='version-row';
+        const details=document.createElement('div');
+        details.innerHTML='<strong></strong><small></small>';
+        details.querySelector('strong').textContent=version.label||'Version';
+        details.querySelector('small').textContent=new Date(version.createdAt).toLocaleString();
+        const restore=document.createElement('button');
+        restore.type='button';restore.textContent='Restore';
+        restore.onclick=async()=>{
+          if(!window.confirm('Restore this version? The current project will first be saved as a checkpoint.'))return;
+          try{
+            await persistNow();
+            await A.project.createVersion(projectId,'Before restore · '+(projectName||'Project'),currentProjectData());
+            const snapshot=await A.project.restoreVersion(projectId,version.id);
+            applyProjectData(snapshot);
+            projectId=snapshot.id;projectName=snapshot.name||projectName;
+            renderStoredChat();updateProjectTitle();renderCommentMarkers();renderProjectSidebar();
+            status('Restored · '+version.label);
+            modal.remove();
+          }catch(error){status('Restore failed · '+error.message);}
+        };
+        row.append(details,restore);host.appendChild(row);
+      });
+    }
+    try{await loadVersions();}catch(error){$id('versionList').textContent='Could not load history · '+error.message;}
+  }
+
+  function renderCommentMarkers() {
+    const host=$id('commentMarkers');
+    if(!host)return;
+    host.innerHTML='';
+    projectComments.forEach((comment,index)=>{
+      const marker=document.createElement('button');
+      marker.type='button';marker.className='video-comment-marker'+(comment.resolved?' resolved':'');
+      marker.textContent=String(index+1);
+      marker.title=(comment.text||'Comment')+' · '+Number(comment.time||0).toFixed(2)+'s';
+      marker.style.left=(Math.max(0,Math.min(1,Number(comment.x)||0.5))*100)+'%';
+      marker.style.top=(Math.max(0,Math.min(1,Number(comment.y)||0.5))*100)+'%';
+      marker.onclick=event=>{
+        event.stopPropagation();
+        const resolve=window.confirm((comment.text||'Comment')+'\\n\\nTime: '+Number(comment.time||0).toFixed(2)+'s\\n\\nMark this comment as resolved?');
+        if(resolve){comment.resolved=!comment.resolved;renderCommentMarkers();scheduleSave();}
+      };
+      host.appendChild(marker);
+    });
+  }
+
+  function installCommentLayer() {
+    const inner=$id('stageInner');
+    const stage=$id('stage');
+    const bar=document.querySelector('.transport');
+    if(!inner||!stage||!bar||$id('btnCommentMode'))return;
+    inner.style.position='relative';
+    const markers=document.createElement('div');
+    markers.id='commentMarkers';markers.className='comment-markers';
+    inner.appendChild(markers);
+    const commentButton=ensureSvgButton('btnCommentMode','Add comment to paused frame',
+      '<path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H5l-1 2v-5.5A7.5 7.5 0 1 1 20 11.5Z"/><path d="M8 11h8M8 14h5"/>');
+    const listButton=ensureSvgButton('btnCommentsList','Show video comments',
+      '<path d="M4 5h16v14H4z"/><path d="M8 9h8M8 12h8M8 15h5"/>');
+    bar.append(commentButton,listButton);
+    commentButton.onclick=()=>{
+      commentMode=!commentMode;
+      commentButton.classList.toggle('active',commentMode);
+      commentButton.title=commentMode?'Click a point on the paused video to add a comment':'Add comment to paused frame';
+      if(commentMode){pause();status('Comment mode · click a point on the video.');}
+      else status('');
+    };
+    listButton.onclick=()=>{
+      let panel=$id('commentsPanel');
+      if(panel){panel.remove();return;}
+      panel=document.createElement('div');panel.id='commentsPanel';panel.className='comments-panel';
+      panel.innerHTML='<header><strong>Video comments</strong><button id="closeComments" class="icon" title="Close">×</button></header><div id="commentsList"></div>';
+      document.body.appendChild(panel);
+      $id('closeComments').onclick=()=>panel.remove();
+      const list=$id('commentsList');
+      if(!projectComments.length)list.textContent='No comments yet. Pause the video, choose the comment icon and click on the frame.';
+      projectComments.forEach(comment=>{
+        const row=document.createElement('button');row.className='comment-list-row';
+        const body=document.createElement('span');body.textContent=comment.text;
+        const timeLabel=document.createElement('small');timeLabel.textContent=Number(comment.time||0).toFixed(2)+'s';
+        row.append(body,timeLabel);
+        row.onclick=()=>{pause();setTime(Number(comment.time)||0);panel.remove();};
+        list.appendChild(row);
+      });
+    };
+    stage.addEventListener('pointerdown',event=>{
+      if(!commentMode)return;
+      event.preventDefault();event.stopImmediatePropagation();
+    },true);
+    stage.addEventListener('click',event=>{
+      if(!commentMode)return;
+      event.preventDefault();event.stopImmediatePropagation();
+      const rect=stage.getBoundingClientRect();
+      const x=Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width));
+      const y=Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height));
+      openCommentComposer(x,y);
+    },true);
+    renderCommentMarkers();
+  }
+
+  function openCommentComposer(x,y) {
+    let modal=$id('commentComposer');
+    if(modal)modal.remove();
+    modal=document.createElement('div');
+    modal.id='commentComposer';modal.className='aiva-modal-backdrop';
+    modal.innerHTML='<section class="aiva-modal comment-modal"><header><div><strong>Comment on this frame</strong><small>Paused at '+Number(time).toFixed(2)+' seconds.</small></div><button id="commentClose" class="icon" title="Close">×</button></header><textarea id="commentText" rows="4" placeholder="Describe what should change at this point…"></textarea><div class="version-actions"><button id="commentCancel">Cancel</button><button id="commentSave" class="primary">Add comment</button></div></section>';
+    document.body.appendChild(modal);
+    const close=()=>{modal.remove();commentMode=false;$id('btnCommentMode')?.classList.remove('active');};
+    $id('commentClose').onclick=close;$id('commentCancel').onclick=close;
+    $id('commentSave').onclick=()=>{
+      const text=$id('commentText').value.trim();if(!text)return;
+      projectComments.push({id:'c_'+Date.now(),text,time:Number(time)||0,x,y,createdAt:Date.now(),resolved:false});
+      renderCommentMarkers();scheduleSave();close();status('Comment added to frame.');
+    };
+    $id('commentText').focus();
+  }
+
+  function installProjectHistoryUI() {
+    // The runAgent wrapper in installMediaAgentTools stores an editable checkpoint after each successful AI edit.
+    if ($id('btnVersionHistory')) $id('btnVersionHistory').onclick=openVersionHistory;
   }
 
   function installSelectionContext() {
