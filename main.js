@@ -488,34 +488,69 @@ ipcMain.handle('export:image', async (_event, dataUrl, defaultName) => {
 });
 
 ipcMain.handle('ffmpeg:begin', async (_event, options) => {
-  if (!getFfmpegPath()) throw new Error('FFmpeg is unavailable. Reinstall the application or enable the MediaRecorder fallback.');
+  if (!getFfmpegPath()) throw new Error('FFmpeg is unavailable in this installation.');
   const fps = Math.max(12, Math.min(60, Number(options.fps) || 30));
   const duration = Math.max(1, Math.min(120, Number(options.duration) || 15));
   const count = Math.ceil(fps * duration);
   if (count > 7200) throw new Error('This export is too long for a single render job.');
+  const ext = options.ext === 'jpg' ? 'jpg' : 'png';
   const id = randomUUID();
   const directory = path.join(app.getPath('temp'), 'aiva-export-' + id);
   await fsp.mkdir(directory, { recursive: true });
-  JOBS.set(id, { directory, fps, duration, count, written: 0, canceled: false });
-  return { id, frameCount: count };
+  let audioPath = null;
+  if (typeof options.audioDataUrl === 'string' && options.audioDataUrl.startsWith('data:')) {
+    const comma = options.audioDataUrl.indexOf(',');
+    if (comma < 0 || !options.audioDataUrl.slice(0, comma).includes(';base64')) {
+      await fsp.rm(directory, { recursive: true, force: true });
+      throw new Error('The project music file is not a valid base64 data URL.');
+    }
+    const mime = options.audioDataUrl.slice(5, options.audioDataUrl.indexOf(';')).toLowerCase();
+    const extensions = {
+      'audio/mpeg':'mp3','audio/mp3':'mp3','audio/wav':'wav','audio/x-wav':'wav',
+      'audio/ogg':'ogg','audio/webm':'webm','audio/mp4':'m4a','audio/aac':'aac',
+      'audio/flac':'flac'
+    };
+    const audioExt = extensions[mime];
+    if (!audioExt) {
+      await fsp.rm(directory, { recursive: true, force: true });
+      throw new Error('Unsupported music format for MP4 export: ' + mime);
+    }
+    const audioBuffer = Buffer.from(options.audioDataUrl.slice(comma + 1), 'base64');
+    if (!audioBuffer.length || audioBuffer.length > 100 * 1024 * 1024) {
+      await fsp.rm(directory, { recursive: true, force: true });
+      throw new Error('Music file is empty or exceeds the 100 MB export limit.');
+    }
+    audioPath = path.join(directory, 'music.' + audioExt);
+    await fsp.writeFile(audioPath, audioBuffer);
+  }
+  JOBS.set(id, {
+    directory, fps, duration, count, ext, audioPath,
+    audioVolume: Math.max(0, Math.min(1, Number(options.audioVolume) || 0.8)),
+    written: 0, canceled: false, child: null
+  });
+  return { id, frameCount: count, hasAudio: Boolean(audioPath) };
 });
 
 ipcMain.handle('ffmpeg:write-frame', async (_event, id, index, dataUrl) => {
   const job = JOBS.get(id);
   if (!job || job.canceled) throw new Error('Export session is no longer active.');
   if (!Number.isInteger(index) || index < 0 || index >= job.count) throw new Error('Invalid export frame index.');
-  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) throw new Error('Invalid frame payload.');
+  const prefix = job.ext === 'jpg' ? 'data:image/jpeg;base64,' : 'data:image/png;base64,';
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith(prefix)) throw new Error('Invalid frame payload.');
   const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
   if (!buffer.length || buffer.length > 20 * 1024 * 1024) throw new Error('Invalid or oversized frame.');
-  await fsp.writeFile(path.join(job.directory, 'frame-' + String(index).padStart(5, '0') + '.png'), buffer);
+  const file = path.join(job.directory, 'frame-' + String(index).padStart(5, '0') + '.' + job.ext);
+  await fsp.writeFile(file, buffer);
   job.written++;
-  if (job.written % 10 === 0) mainWindow?.webContents.send('export:progress', { phase: 'frames', value: job.written / job.count });
+  if (job.written % 10 === 0 || job.written === job.count) {
+    mainWindow?.webContents.send('export:progress', { phase: 'frames', value: job.written / job.count });
+  }
   return { written: job.written };
 });
 
 ipcMain.handle('ffmpeg:finish', async (_event, id) => {
   const job = JOBS.get(id);
-  if (!job) throw new Error('Export session not found.');
+  if (!job || job.canceled) throw new Error('Export session not found or cancelled.');
   if (job.written !== job.count) throw new Error('Frame sequence is incomplete: ' + job.written + ' / ' + job.count + '.');
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: 'AI-Video-Agent.mp4',
@@ -528,46 +563,63 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
   }
   const output = result.filePath.toLowerCase().endsWith('.mp4') ? result.filePath : result.filePath + '.mp4';
   const partial = output.replace(/\.mp4$/i, '.partial.mp4');
+  const frames = path.join(job.directory, 'frame-%05d.' + job.ext);
   const args = [
     '-hide_banner', '-y', '-framerate', String(job.fps),
-    '-start_number', '0', '-i', path.join(job.directory, 'frame-%05d.png'),
+    '-start_number', '0', '-i', frames
+  ];
+  if (job.audioPath) {
+    args.push('-stream_loop', '-1', '-i', job.audioPath);
+  }
+  args.push('-t', String(job.duration), '-map', '0:v:0');
+  if (job.audioPath) {
+    args.push('-map', '1:a:0', '-filter:a', 'volume=' + job.audioVolume.toFixed(3), '-c:a', 'aac', '-b:a', '192k');
+  }
+  args.push(
     '-frames:v', String(job.count), '-c:v', 'libx264',
     '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
     '-movflags', '+faststart', partial
-  ];
+  );
   const binary = getFfmpegPath();
-  await new Promise((resolve, reject) => {
-    const child = spawn(binary, args, { windowsHide: true });
-    let stderr = '';
-    child.stderr.on('data', chunk => {
-      const chunkText = chunk.toString();
-      stderr = (stderr + chunkText).slice(-5000);
-      const match = chunkText.match(/frame=\s*(\d+)/);
-      if (match) mainWindow?.webContents.send('export:progress', { phase: 'encoding', value: Math.min(0.99, Number(match[1]) / job.count) });
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn(binary, args, { windowsHide: true });
+      job.child = child;
+      let stderr = '';
+      child.stderr.on('data', chunk => {
+        const chunkText = chunk.toString();
+        stderr = (stderr + chunkText).slice(-5000);
+        const match = chunkText.match(/frame=\s*(\d+)/);
+        if (match) mainWindow?.webContents.send('export:progress', {
+          phase: 'encoding', value: Math.min(0.99, Number(match[1]) / job.count)
+        });
+      });
+      child.once('error', reject);
+      child.once('close', code => {
+        job.child = null;
+        if (job.canceled) reject(new Error('Export cancelled.'));
+        else if (code === 0) resolve();
+        else reject(new Error('FFmpeg exited with code ' + code + ': ' + stderr.slice(-1200)));
+      });
     });
-    child.once('error', reject);
-    child.once('close', code => {
-      if (code === 0) resolve();
-      else reject(new Error('FFmpeg exited with code ' + code + ': ' + stderr.slice(-1200)));
-    });
-  }).then(async () => {
     await fsp.rename(partial, output);
-  }).catch(async error => {
+    const stat = await fsp.stat(output);
+    mainWindow?.webContents.send('export:progress', { phase: 'done', value: 1 });
+    return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg', audio: Boolean(job.audioPath) };
+  } catch (error) {
     await fsp.rm(partial, { force: true });
     throw error;
-  }).finally(async () => {
+  } finally {
     await fsp.rm(job.directory, { recursive: true, force: true });
     JOBS.delete(id);
-  });
-  const stat = await fsp.stat(output);
-  mainWindow?.webContents.send('export:progress', { phase: 'done', value: 1 });
-  return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg' };
+  }
 });
 
 ipcMain.handle('ffmpeg:cancel', async (_event, id) => {
   const job = JOBS.get(id);
   if (job) {
     job.canceled = true;
+    try { job.child?.kill('SIGTERM'); } catch {}
     await fsp.rm(job.directory, { recursive: true, force: true });
     JOBS.delete(id);
   }
