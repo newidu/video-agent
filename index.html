@@ -4582,6 +4582,7 @@ function normalizeSpec(s) {
       dur: Math.max(0.6, Math.min(30, +sc.dur || 2.5)),
       bg: sc.bg || '#F1F7FF',
       media: sc.media || null,
+      transitionIn: sc.transitionIn && typeof sc.transitionIn === 'object' ? sc.transitionIn : undefined,
       js: typeof sc.js === 'string' && sc.js.trim() ? sc.js : undefined,
       elements: elements.map((el, j) => Object.assign({ x: 540, y: 900 }, el, { id: el.id || (sc.id || ('s' + (i + 1))) + '.e' + j }))
     });
