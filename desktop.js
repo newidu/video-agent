@@ -462,6 +462,65 @@
     }
   }
 
+  function installVoiceoverTrack() {
+    if (window.__AIVA_VOICE_TRACK__) return;
+    window.__AIVA_VOICE_TRACK__ = true;
+    const voice = new Audio();
+    voice.preload = 'auto';
+    voice.volume = 1;
+    window.AIVA_VOICE_AUDIO = voice;
+    window.AIVA_APPLY_VOICEOVER = dataUrl => {
+      if (!dataUrl) {
+        voice.pause();
+        voice.removeAttribute('src');
+        voice.load();
+        return;
+      }
+      if (voice.src !== dataUrl) {
+        voice.src = dataUrl;
+        voice.load();
+      }
+      try { voice.currentTime = Math.max(0, Number(time) || 0); } catch (error) {}
+      if (typeof playing !== 'undefined' && playing) voice.play().catch(() => {});
+    };
+    const originalPlay = window.play;
+    if (typeof originalPlay === 'function') {
+      window.play = function () {
+        const result = originalPlay.apply(this, arguments);
+        if (voice.src) {
+          try { voice.currentTime = Math.max(0, Number(time) || 0); } catch (error) {}
+          voice.play().catch(() => {});
+        }
+        return result;
+      };
+    }
+    const originalPause = window.pause;
+    if (typeof originalPause === 'function') {
+      window.pause = function () {
+        const result = originalPause.apply(this, arguments);
+        voice.pause();
+        return result;
+      };
+    }
+    const originalRender = window.renderFrame;
+    if (typeof originalRender === 'function') {
+      window.renderFrame = function (frameTime) {
+        const result = originalRender.apply(this, arguments);
+        if (voice.src && Number.isFinite(frameTime)) {
+          const target = Math.max(0, frameTime);
+          if (typeof playing !== 'undefined' && playing) {
+            if (Math.abs((voice.currentTime || 0) - target) > 0.28) {
+              try { voice.currentTime = Math.min(target, Math.max(0, (voice.duration || target) - 0.03)); } catch (error) {}
+            }
+          } else {
+            try { voice.currentTime = Math.min(target, Math.max(0, (voice.duration || target) - 0.03)); } catch (error) {}
+          }
+        }
+        return result;
+      };
+    }
+  }
+
   function installMediaAgentTools() {
     if (window.__AIVA_MEDIA_TOOLS__) return;
     window.__AIVA_MEDIA_TOOLS__ = true;
@@ -585,11 +644,14 @@
     TOOL_IMPL.generate_voiceover = async args => {
       const text=String(args && args.text || '').trim();if(!text)return 'Provide narration text.';
       const result=await A.media.generateVoiceover({text,projectId,voice:args.voice});
-      MUSIC.dataUrl=result.dataUrl;MUSIC.name='AI voiceover';MUSIC.on=true;
-      MUSIC.volume=Math.max(0,Math.min(1,Number(args && args.volume)||0.85));MUSIC.dur=0;
-      hookMusicAudio();applyMusic(true);if(typeof setMusicOn==='function')setMusicOn(true);
-      scheduleSave();
-      return JSON.stringify({voiceover:'generated',file:result.file,bytes:result.bytes,mime:result.mime,syncedToProjectPlayhead:true});
+      SPEC.voiceover={
+        dataUrl:result.dataUrl,file:result.file,bytes:result.bytes,mime:result.mime,
+        volume:Math.max(0,Math.min(1,Number(args && args.volume)||1)),
+        createdAt:Date.now()
+      };
+      if(typeof window.AIVA_APPLY_VOICEOVER==='function')window.AIVA_APPLY_VOICEOVER(result.dataUrl);
+      buildScenes();syncSpec();renderFrame(time);scheduleSave();
+      return JSON.stringify({voiceover:'generated as a separate narration track',file:result.file,bytes:result.bytes,mime:result.mime,syncedToProjectPlayhead:true,backgroundMusicPreserved:true});
     };
     TOOL_IMPL.add_video_comment = args => {
       const comment={
@@ -1081,6 +1143,9 @@
         applyMusic(true);
       }
       if (SPEC.fonts) Object.keys(SPEC.fonts).forEach(name => registerFont(name, SPEC.fonts[name]));
+      if (typeof window.AIVA_APPLY_VOICEOVER === 'function') {
+        window.AIVA_APPLY_VOICEOVER(SPEC.voiceover && SPEC.voiceover.dataUrl || null);
+      }
       SELECTED = null;
       buildScenes();
       syncSpec();
@@ -1136,6 +1201,8 @@
       SPEC.title = title;
       SPEC.format = ['16:9','9:16','1:1'].includes(options.format) ? options.format : '9:16';
       SPEC.scenes = [];
+      delete SPEC.voiceover;
+      if (typeof window.AIVA_APPLY_VOICEOVER === 'function') window.AIVA_APPLY_VOICEOVER(null);
       EDIT.items = {};
       EDIT.scenes = {};
       EDIT.base = {};
@@ -1545,7 +1612,9 @@
           audioDataUrl:musicData,
           audioVolume:MUSIC && MUSIC.volume != null ? MUSIC.volume : 0.8,
           sourceVideoPath:window.AIVA_SOURCE_PATH || null,
-          keepRanges:mediaScene && mediaScene.media && mediaScene.media.keepRanges || null
+          keepRanges:mediaScene && mediaScene.media && mediaScene.media.keepRanges || null,
+          voiceoverDataUrl:SPEC.voiceover && SPEC.voiceover.dataUrl || null,
+          voiceoverVolume:SPEC.voiceover && SPEC.voiceover.volume != null ? SPEC.voiceover.volume : 1
         });
         activeExportId = session.id;
         unlisten = A.export.onProgress(progress => {
@@ -2191,6 +2260,7 @@
     installProjectHistoryUI();
     installCommentLayer();
     installSecureAgent();
+    installVoiceoverTrack();
     installMediaAgentTools();
     installToolPolicy();
     installPlayerControls();
@@ -2209,6 +2279,9 @@
       document.body.classList.toggle('sidebar-hidden',!!pair[2].sidebarHidden);
       document.body.classList.toggle('agent-hidden',!!pair[2].agentHidden);
       await loadProviderConfig();
+      if (SPEC.voiceover && SPEC.voiceover.dataUrl && typeof window.AIVA_APPLY_VOICEOVER === 'function') {
+        window.AIVA_APPLY_VOICEOVER(SPEC.voiceover.dataUrl);
+      }
       if ($id('btnExport')) $id('btnExport').title = ffmpegAvailable ? 'Export MP4 · FFmpeg' : 'Export video';
       if ($id('btnSave')) $id('btnSave').title = 'Save project';
       if ($id('btnClearChat')) $id('btnClearChat').addEventListener('click',scheduleSave);
