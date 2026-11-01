@@ -1609,8 +1609,13 @@
   function installVideoExport() {
     const previousExport = window.exportVideo;
     window.exportVideo = async function () {
-      if (!ffmpegAvailable) {
-        status('FFmpeg is not available in this installation. MP4 export is disabled.');
+      const ffmpegEnabled = ffmpegAvailable && !(settingsData && settingsData.integrations && settingsData.integrations.ffmpeg === false);
+      if (!ffmpegEnabled) {
+        if (typeof previousExport === 'function') {
+          status('FFmpeg disabled · using the MediaRecorder fallback.');
+          return previousExport.apply(this,arguments);
+        }
+        status('FFmpeg is unavailable and no MediaRecorder fallback was found.');
         return;
       }
       if (!SPEC.scenes || !SPEC.scenes.length) {
@@ -2168,6 +2173,7 @@
         });
         window.AIVA_BRAND_KIT=settingsData.brandKit;
         if(typeof window.applyAivaBrandKit==='function')window.applyAivaBrandKit(settingsData.brandKit);
+        scheduleSave();
         settingsStatus('Brand Kit saved · new agent scenes will follow this identity',true);
       }catch(error){settingsStatus(error.message,false);}
     };
