@@ -31,7 +31,7 @@ jobs:
       - name: Upload Windows installers
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Video-Agent-Windows-\${{ github.run_number }}
+          name: AI-Video-Agent-Windows-${{ github.run_number }}
           path: |
             dist/*.exe
             dist/*.blockmap
