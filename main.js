@@ -965,6 +965,57 @@ ipcMain.handle('settings:save-appearance', async (_event, value) => {
   return appearance;
 });
 
+ipcMain.handle('theme:export', async () => {
+  const result=await dialog.showSaveDialog(mainWindow,{
+    defaultPath:'AI-Video-Agent-Theme.json',
+    filters:[{name:'AI Video Agent theme',extensions:['json']}]
+  });
+  if(result.canceled||!result.filePath)return {canceled:true};
+  const output=result.filePath.toLowerCase().endsWith('.json')?result.filePath:result.filePath+'.json';
+  const theme=readConfig('theme',{mode:'light',accent:'#C65A2E'});
+  await writeJsonAtomic(output,theme);
+  const stat=await fsp.stat(output);
+  return {saved:true,path:output,bytes:stat.size};
+});
+ipcMain.handle('theme:import', async () => {
+  const result=await dialog.showOpenDialog(mainWindow,{
+    properties:['openFile'],
+    filters:[{name:'AI Video Agent theme',extensions:['json']}]
+  });
+  if(result.canceled||!result.filePaths.length)return {canceled:true};
+  const imported=readJson(result.filePaths[0],null);
+  if(!imported||typeof imported!=='object')throw new Error('The selected theme JSON is invalid.');
+  const color=(v,fallback)=>/^#[0-9a-fA-F]{6}$/.test(String(v||''))?v:fallback;
+  const allowed=['light','dark','system','custom'];
+  const appearance={
+    mode:allowed.includes(imported.mode)?imported.mode:'custom',
+    accent:color(imported.accent,'#C65A2E'),
+    bg:color(imported.bg,'#F7F6F3'),
+    paper:color(imported.paper,'#FFFFFF'),
+    paper2:color(imported.paper2,'#F0EFEB'),
+    ink:color(imported.ink,'#171614'),
+    ink2:color(imported.ink2,'#45423E'),
+    muted:color(imported.muted,'#85817B'),
+    line:color(imported.line,'#E5E2DC'),
+    line2:color(imported.line2,'#D4D0C8'),
+    rail:color(imported.rail,'#FBFAF8'),
+    railInk:color(imported.railInk,'#171614'),
+    fontUi:/^[\w\s,'"-]{1,100}$/.test(String(imported.fontUi||''))?String(imported.fontUi):'Inter, Segoe UI, system-ui, sans-serif',
+    fontMono:/^[\w\s,'"-]{1,100}$/.test(String(imported.fontMono||''))?String(imported.fontMono):'Geist Mono, Consolas, monospace',
+    fontScale:[100,110,125].includes(Number(imported.fontScale))?Number(imported.fontScale):100,
+    density:imported.density==='compact'?'compact':'comfortable',
+    reduceMotion:Boolean(imported.reduceMotion),
+    windowMaterial:['acrylic','mica','tabbed','auto','none'].includes(imported.windowMaterial)?imported.windowMaterial:'mica'
+  };
+  const previous=readConfig('theme',{});
+  await writeConfig('theme',appearance);
+  nativeTheme.themeSource=appearance.mode==='system'?'system':appearance.mode==='dark'?'dark':'light';
+  mainWindow?.webContents.send('theme:changed',appearance);
+  settingsWindow?.webContents.send('theme:changed',appearance);
+  if(previous.windowMaterial!==appearance.windowMaterial)recreateMainWindow();
+  return {imported:true,appearance};
+});
+
 ipcMain.handle('settings:save-tools', async (_event, value) => {
   const core = ['get_project', 'replace_spec', 'verify_video'];
   const state = { ...(value.state || {}) };
