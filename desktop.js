@@ -2305,6 +2305,14 @@
     try { await A.settings.saveAppearance(current); } catch (error) { status(error.message); }
   });
   A.onThemeChanged(applyAppearance);
+  A.onBrandChanged(value => {
+    settingsData = settingsData || {};
+    settingsData.brandKit=value;
+    window.AIVA_BRAND_KIT=value;
+    applyAivaBrandKit(value);
+    scheduleSave();
+    renderProjectSidebar();
+  });
 
   window.addEventListener('keydown', event => {
     if (window.__EXPORTING) return;
