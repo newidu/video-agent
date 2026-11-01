@@ -9,9 +9,13 @@
   "scripts": {
     "start": "electron .",
     "check:syntax": "node --check main.js && node --check preload.js && node --check desktop.js && node --check engine.player.js && node scripts/check-prototype.js",
-    "test": "npm run check:syntax",
+    "test": "npm run build:vendor && npm run check:syntax",
     "dist:win": "electron-builder --win nsis portable --x64 --publish never",
-    "dist:win:release": "electron-builder --win nsis portable --x64 --publish always"
+    "dist:win:release": "electron-builder --win nsis portable --x64 --publish always",
+    "build:vendor": "node scripts/build-vendor.js",
+    "prestart": "npm run build:vendor",
+    "predist:win": "npm run build:vendor",
+    "predist:win:release": "npm run build:vendor"
   },
   "dependencies": {
     "archiver": "^7.0.1",
@@ -23,7 +27,8 @@
   },
   "devDependencies": {
     "electron": "^38.0.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.0"
   },
   "build": {
     "appId": "com.newidu.aivideoagent",
