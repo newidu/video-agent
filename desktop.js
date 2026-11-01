@@ -1481,10 +1481,13 @@
       if ($id('btnStop')) $id('btnStop').textContent = 'Cancel export';
       try {
         const musicData = MUSIC && MUSIC.on !== false && MUSIC.dataUrl ? MUSIC.dataUrl : null;
+        const mediaScene=(SPEC.scenes||[]).find(scene=>scene.media);
         const session = await A.export.begin({
           fps:fps,duration:duration,ext:'jpg',
           audioDataUrl:musicData,
-          audioVolume:MUSIC && MUSIC.volume != null ? MUSIC.volume : 0.8
+          audioVolume:MUSIC && MUSIC.volume != null ? MUSIC.volume : 0.8,
+          sourceVideoPath:window.AIVA_SOURCE_PATH || null,
+          keepRanges:mediaScene && mediaScene.media && mediaScene.media.keepRanges || null
         });
         activeExportId = session.id;
         unlisten = A.export.onProgress(progress => {
