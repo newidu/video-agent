@@ -1,0 +1,584 @@
+'use strict';
+
+const { app, BrowserWindow, ipcMain, dialog, Menu, safeStorage, nativeTheme, shell } = require('electron');
+const path = require('node:path');
+const os = require('node:os');
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const { spawn } = require('node:child_process');
+const { randomUUID } = require('node:crypto');
+
+const APP_NAME = 'AI Video Agent';
+const ROOT = __dirname;
+const DATA = () => app.getPath('userData');
+const CONFIG = () => path.join(DATA(), 'config');
+const PROJECTS = () => path.join(DATA(), 'projects');
+const JOBS = new Map();
+let mainWindow = null;
+let settingsWindow = null;
+
+function readJson(file, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+async function writeJsonAtomic(file, value) {
+  await fsp.mkdir(path.dirname(file), { recursive: true });
+  const temp = file + '.' + randomUUID() + '.tmp';
+  await fsp.writeFile(temp, JSON.stringify(value, null, 2), 'utf8');
+  await fsp.rename(temp, file);
+}
+
+function configFile(name) {
+  return path.join(CONFIG(), name + '.json');
+}
+
+function readConfig(name, fallback) {
+  return readJson(configFile(name), fallback);
+}
+
+async function writeConfig(name, value) {
+  return writeJsonAtomic(configFile(name), value);
+}
+
+function readSecrets() {
+  const file = path.join(CONFIG(), 'secrets.bin');
+  try {
+    if (!fs.existsSync(file) || !safeStorage.isEncryptionAvailable()) return {};
+    return JSON.parse(safeStorage.decryptString(fs.readFileSync(file)));
+  } catch {
+    return {};
+  }
+}
+
+async function writeSecrets(secrets) {
+  if (!safeStorage.isEncryptionAvailable()) {
+    throw new Error('Secure key storage is unavailable. Check your Windows user profile and DPAPI configuration.');
+  }
+  await fsp.mkdir(CONFIG(), { recursive: true });
+  const encrypted = safeStorage.encryptString(JSON.stringify(secrets));
+  const file = path.join(CONFIG(), 'secrets.bin');
+  const temp = file + '.' + randomUUID() + '.tmp';
+  await fsp.writeFile(temp, encrypted);
+  await fsp.rename(temp, file);
+}
+
+function cleanProvider(input) {
+  const id = String(input.id || randomUUID()).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+  const baseUrl = String(input.base_url || '').trim().replace(/\/+$/, '');
+  let parsed;
+  try { parsed = new URL(baseUrl); } catch { throw new Error('Enter a valid provider Base URL.'); }
+  if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error('Provider URLs must use HTTP or HTTPS.');
+  if (parsed.protocol === 'http:' && !['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
+    throw new Error('HTTP is allowed only for localhost providers. Use HTTPS for remote providers.');
+  }
+  return {
+    id,
+    name: String(input.name || parsed.hostname).trim().slice(0, 80) || parsed.hostname,
+    base_url: baseUrl,
+    models: Array.isArray(input.models) ? input.models.map(String).slice(0, 300) : [],
+    enabled_models: Array.isArray(input.enabled_models) ? input.enabled_models.map(String).slice(0, 300) : [],
+    headers: input.headers && typeof input.headers === 'object' ? input.headers : {},
+    createdAt: Number(input.createdAt) || Date.now()
+  };
+}
+
+function getFfmpegPath() {
+  try {
+    const resolved = require('ffmpeg-static');
+    if (resolved && fs.existsSync(resolved)) return resolved;
+  } catch {}
+  return null;
+}
+
+function makeWindowOptions(kind) {
+  const isWindows = process.platform === 'win32';
+  const releaseParts = os.release().split('.').map(Number);
+  const isWin11 = isWindows && releaseParts[0] >= 10 && (releaseParts[2] || 0) >= 22000;
+  const settings = kind === 'settings';
+  const base = {
+    width: settings ? 720 : 1440,
+    height: settings ? 640 : 900,
+    minWidth: settings ? 600 : 960,
+    minHeight: settings ? 520 : 640,
+    title: settings ? 'Settings · ' + APP_NAME : APP_NAME,
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: isWin11 ? '#00000000' : '#F7F7F5',
+    webPreferences: {
+      preload: path.join(ROOT, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true
+    }
+  };
+  if (isWin11) {
+    base.backgroundMaterial = settings ? 'acrylic' : 'mica';
+    base.transparent = true;
+  } else if (process.platform === 'darwin') {
+    base.vibrancy = 'under-window';
+    base.visualEffectState = 'active';
+  }
+  return base;
+}
+
+function loadAppWindow(win, view) {
+  win.loadFile(path.join(ROOT, 'index.html'), { query: view ? { view } : {} });
+}
+
+function createMainWindow() {
+  mainWindow = new BrowserWindow(makeWindowOptions('main'));
+  loadAppWindow(mainWindow, 'studio');
+  mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
+  mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+function openSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.show();
+    settingsWindow.focus();
+    return;
+  }
+  settingsWindow = new BrowserWindow({
+    ...makeWindowOptions('settings'),
+    parent: mainWindow || undefined,
+    modal: false
+  });
+  loadAppWindow(settingsWindow, 'settings');
+  settingsWindow.once('ready-to-show', () => settingsWindow && settingsWindow.show());
+  settingsWindow.on('closed', () => { settingsWindow = null; });
+}
+
+function buildMenu() {
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        { label: 'New project', accelerator: 'CmdOrCtrl+N', click: () => mainWindow?.webContents.send('menu:new-project') },
+        { label: 'Open project gallery', accelerator: 'CmdOrCtrl+O', click: () => mainWindow?.webContents.send('menu:home') },
+        { type: 'separator' },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: openSettingsWindow },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Light theme', click: () => mainWindow?.webContents.send('menu:theme', 'light') },
+        { label: 'Dark theme', click: () => mainWindow?.webContents.send('menu:theme', 'dark') },
+        { label: 'System theme', click: () => mainWindow?.webContents.send('menu:theme', 'system') },
+        { type: 'separator' },
+        { role: 'toggleDevTools' },
+        { role: 'reload' },
+        { role: 'togglefullscreen' }
+      ]
+    }
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function safeProjectId(id) {
+  const value = String(id || '');
+  if (!/^prj_[a-zA-Z0-9_-]{4,80}$/.test(value)) throw new Error('Invalid project identifier.');
+  return value;
+}
+
+function projectFile(id) {
+  return path.join(PROJECTS(), safeProjectId(id) + '.json');
+}
+
+function makeProject(name) {
+  const id = 'prj_' + Date.now().toString(36) + '_' + randomUUID().slice(0, 6);
+  return {
+    id,
+    name: String(name || 'Untitled project').trim().slice(0, 100) || 'Untitled project',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    format: { width: 1920, height: 1080, fps: 30 },
+    duration: 15,
+    playhead: 0,
+    background: '#111111',
+    items: [],
+    chat: [],
+    showBeats: false,
+    playbackSpeed: 1
+  };
+}
+
+async function projectList() {
+  await fsp.mkdir(PROJECTS(), { recursive: true });
+  const entries = await fsp.readdir(PROJECTS(), { withFileTypes: true });
+  const projects = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !/^prj_[\w-]+\.json$/.test(entry.name)) continue;
+    const project = readJson(path.join(PROJECTS(), entry.name), null);
+    if (project && project.id) {
+      projects.push({
+        id: project.id,
+        name: project.name || 'Untitled project',
+        updatedAt: project.updatedAt || 0,
+        createdAt: project.createdAt || 0,
+        thumbnail: project.thumbnail || null
+      });
+    }
+  }
+  return projects.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function validateProject(input) {
+  if (!input || typeof input !== 'object') throw new Error('Invalid project data.');
+  const id = safeProjectId(input.id);
+  const format = input.format || {};
+  const width = Math.max(320, Math.min(3840, Number(format.width) || 1920));
+  const height = Math.max(320, Math.min(3840, Number(format.height) || 1080));
+  const fps = Math.max(12, Math.min(60, Number(format.fps) || 30));
+  return {
+    ...input,
+    id,
+    name: String(input.name || 'Untitled project').slice(0, 100),
+    format: { width, height, fps },
+    duration: Math.max(1, Math.min(120, Number(input.duration) || 15)),
+    playhead: Math.max(0, Math.min(120, Number(input.playhead) || 0)),
+    background: /^#[0-9a-fA-F]{6}$/.test(input.background) ? input.background : '#111111',
+    items: Array.isArray(input.items) ? input.items.slice(0, 500) : [],
+    chat: Array.isArray(input.chat) ? input.chat.slice(-300) : [],
+    updatedAt: Date.now()
+  };
+}
+
+ipcMain.handle('app:info', () => ({
+  version: app.getVersion(),
+  electron: process.versions.electron,
+  platform: process.platform,
+  userData: DATA(),
+  ffmpegAvailable: Boolean(getFfmpegPath()),
+  materialSupported: process.platform === 'win32' && (Number(os.release().split('.')[2]) || 0) >= 22000
+}));
+
+ipcMain.handle('window:settings', () => { openSettingsWindow(); return true; });
+ipcMain.handle('window:reveal-data', async () => { await shell.openPath(DATA()); return DATA(); });
+
+ipcMain.handle('projects:list', () => projectList());
+ipcMain.handle('projects:create', async (_event, name) => {
+  const project = makeProject(name);
+  await writeJsonAtomic(projectFile(project.id), project);
+  return project;
+});
+ipcMain.handle('projects:load', async (_event, id) => {
+  const project = readJson(projectFile(id), null);
+  if (!project) throw new Error('Project not found.');
+  return project;
+});
+ipcMain.handle('projects:save', async (_event, input) => {
+  const project = validateProject(input);
+  await writeJsonAtomic(projectFile(project.id), project);
+  return { saved: true, updatedAt: project.updatedAt };
+});
+ipcMain.handle('projects:rename', async (_event, id, name) => {
+  const project = readJson(projectFile(id), null);
+  if (!project) throw new Error('Project not found.');
+  project.name = String(name || 'Untitled project').trim().slice(0, 100) || 'Untitled project';
+  project.updatedAt = Date.now();
+  await writeJsonAtomic(projectFile(id), project);
+  return { name: project.name };
+});
+ipcMain.handle('projects:delete', async (_event, id) => {
+  await fsp.rm(projectFile(id), { force: true });
+  return true;
+});
+
+ipcMain.handle('providers:list', () => {
+  const data = readConfig('providers', { active: null, providers: [] });
+  const secrets = readSecrets();
+  return {
+    active: data.active,
+    providers: (data.providers || []).map(p => ({
+      ...p,
+      keyConfigured: Boolean(secrets['provider:' + p.id]),
+      keyHint: secrets['provider:' + p.id] ? '••••' + String(secrets['provider:' + p.id]).slice(-4) : ''
+    }))
+  };
+});
+
+ipcMain.handle('providers:save', async (_event, input) => {
+  const provider = cleanProvider(input);
+  const data = readConfig('providers', { active: null, providers: [] });
+  const secrets = readSecrets();
+  if (typeof input.api_key === 'string' && input.api_key.trim()) {
+    secrets['provider:' + provider.id] = input.api_key.trim();
+    await writeSecrets(secrets);
+  }
+  const exists = (data.providers || []).some(p => p.id === provider.id);
+  data.providers = (data.providers || []).filter(p => p.id !== provider.id);
+  data.providers.push(provider);
+  if (!data.active || !exists && data.providers.length === 1) data.active = provider.id;
+  await writeConfig('providers', data);
+  return { saved: true, active: data.active };
+});
+
+ipcMain.handle('providers:set-active', async (_event, id) => {
+  const data = readConfig('providers', { active: null, providers: [] });
+  if (!(data.providers || []).some(p => p.id === id)) throw new Error('Provider not found.');
+  data.active = id;
+  await writeConfig('providers', data);
+  return true;
+});
+
+ipcMain.handle('providers:delete', async (_event, id) => {
+  const data = readConfig('providers', { active: null, providers: [] });
+  data.providers = (data.providers || []).filter(p => p.id !== id);
+  if (data.active === id) data.active = data.providers[0]?.id || null;
+  const secrets = readSecrets();
+  delete secrets['provider:' + id];
+  await writeSecrets(secrets);
+  await writeConfig('providers', data);
+  return true;
+});
+
+ipcMain.handle('providers:test', async (_event, input) => {
+  const provider = cleanProvider(input);
+  const secrets = readSecrets();
+  const key = String(input.api_key || secrets['provider:' + provider.id] || '');
+  const headers = { Accept: 'application/json', ...provider.headers };
+  if (key) headers.Authorization = 'Bearer ' + key;
+  const response = await fetch(provider.base_url + '/models', { headers, signal: AbortSignal.timeout(20000) });
+  const bodyText = await response.text();
+  if (!response.ok) throw new Error('HTTP ' + response.status + ': ' + bodyText.slice(0, 200));
+  let body;
+  try { body = JSON.parse(bodyText); } catch { throw new Error('The provider returned invalid JSON from /models.'); }
+  const models = Array.isArray(body.data) ? body.data.map(m => ({
+    id: String(m.id),
+    context_length: m.context_length || m.context_window || null
+  })) : [];
+  return { connected: true, models };
+});
+
+ipcMain.handle('ai:chat', async (_event, input) => {
+  const data = readConfig('providers', { active: null, providers: [] });
+  const provider = (data.providers || []).find(p => p.id === (input.providerId || data.active));
+  if (!provider) throw new Error('No AI provider is configured. Open Settings → Providers.');
+  const secrets = readSecrets();
+  const key = secrets['provider:' + provider.id];
+  if (!key) throw new Error('Add an API key in Settings → Providers.');
+  const model = String(input.model || provider.enabled_models?.[0] || provider.models?.[0] || '');
+  if (!model) throw new Error('Select an enabled model in Settings → Providers.');
+  const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key, ...provider.headers };
+  const body = {
+    model,
+    messages: Array.isArray(input.messages) ? input.messages.slice(-80) : [],
+    temperature: 0.4,
+    stream: false
+  };
+  if (Array.isArray(input.tools) && input.tools.length) {
+    body.tools = input.tools;
+    body.tool_choice = 'auto';
+  }
+  const response = await fetch(provider.base_url + '/chat/completions', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120000)
+  });
+  const raw = await response.text();
+  if (!response.ok) throw new Error('AI API HTTP ' + response.status + ': ' + raw.slice(0, 600));
+  let result;
+  try { result = JSON.parse(raw); } catch { throw new Error('The AI provider returned invalid JSON.'); }
+  if (!result.choices?.[0]?.message) throw new Error('The provider response did not include a chat message.');
+  return result.choices[0].message;
+});
+
+ipcMain.handle('settings:get', () => ({
+  appearance: readConfig('theme', { mode: 'light', accent: '#111111', fontScale: 100, density: 'comfortable', reduceMotion: false, windowMaterial: 'mica' }),
+  tools: readConfig('tools', { state: { get_project: 'on', replace_spec: 'on', verify_video: 'on', add_text: 'on', set_background: 'on', set_format: 'lazy', remove_element: 'lazy', critique: 'lazy' }, options: {} }),
+  integrations: readConfig('integrations', { ffmpeg: true, captions: false, tts: false, image: false, music: false, webSearch: false }),
+  music: readConfig('music', { bpm: 120, volume: 0.7, fadeIn: 0.5, fadeOut: 0.5, autoSfx: true, musicOffByDefault: true })
+}));
+
+ipcMain.handle('settings:save-appearance', async (_event, value) => {
+  const allowed = ['light', 'dark', 'system', 'custom'];
+  const mode = allowed.includes(value.mode) ? value.mode : 'light';
+  const appearance = {
+    mode,
+    accent: /^#[0-9a-fA-F]{6}$/.test(value.accent) ? value.accent : '#111111',
+    fontScale: [100, 110, 125].includes(Number(value.fontScale)) ? Number(value.fontScale) : 100,
+    density: value.density === 'compact' ? 'compact' : 'comfortable',
+    reduceMotion: Boolean(value.reduceMotion),
+    windowMaterial: ['acrylic', 'mica', 'tabbed', 'auto', 'none'].includes(value.windowMaterial) ? value.windowMaterial : 'mica'
+  };
+  await writeConfig('theme', appearance);
+  nativeTheme.themeSource = mode === 'system' ? 'system' : mode === 'dark' ? 'dark' : 'light';
+  mainWindow?.webContents.send('theme:changed', appearance);
+  settingsWindow?.webContents.send('theme:changed', appearance);
+  return appearance;
+});
+ipcMain.handle('settings:save-tools', async (_event, value) => {
+  const core = ['get_project', 'replace_spec', 'verify_video'];
+  const state = { ...(value.state || {}) };
+  for (const name of core) state[name] = 'on';
+  const clean = {};
+  for (const [name, status] of Object.entries(state)) clean[name] = ['on', 'lazy', 'off'].includes(status) ? status : 'off';
+  const result = { state: clean, options: value.options || {} };
+  await writeConfig('tools', result);
+  return result;
+});
+ipcMain.handle('settings:save-integrations', async (_event, value) => {
+  const result = {
+    ffmpeg: value.ffmpeg !== false,
+    captions: Boolean(value.captions),
+    tts: Boolean(value.tts),
+    image: Boolean(value.image),
+    music: Boolean(value.music),
+    webSearch: Boolean(value.webSearch)
+  };
+  await writeConfig('integrations', result);
+  return result;
+});
+ipcMain.handle('settings:save-music', async (_event, value) => {
+  const result = {
+    bpm: Math.max(40, Math.min(240, Number(value.bpm) || 120)),
+    volume: Math.max(0, Math.min(1, Number(value.volume) || 0.7)),
+    fadeIn: Math.max(0, Math.min(10, Number(value.fadeIn) || 0)),
+    fadeOut: Math.max(0, Math.min(10, Number(value.fadeOut) || 0)),
+    autoSfx: Boolean(value.autoSfx),
+    musicOffByDefault: Boolean(value.musicOffByDefault)
+  };
+  await writeConfig('music', result);
+  return result;
+});
+
+ipcMain.handle('export:image', async (_event, dataUrl, defaultName) => {
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) throw new Error('Invalid PNG image payload.');
+  const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  if (!buffer.length || buffer.length > 30 * 1024 * 1024) throw new Error('Image is empty or too large.');
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: String(defaultName || 'frame.png'),
+    filters: [{ name: 'PNG image', extensions: ['png'] }]
+  });
+  if (result.canceled || !result.filePath) return { canceled: true };
+  await fsp.writeFile(result.filePath, buffer);
+  const stat = await fsp.stat(result.filePath);
+  if (!stat.size) throw new Error('The image was not written to disk.');
+  return { saved: true, path: result.filePath, bytes: stat.size };
+});
+
+ipcMain.handle('ffmpeg:begin', async (_event, options) => {
+  if (!getFfmpegPath()) throw new Error('FFmpeg is unavailable. Reinstall the application or enable the MediaRecorder fallback.');
+  const fps = Math.max(12, Math.min(60, Number(options.fps) || 30));
+  const duration = Math.max(1, Math.min(120, Number(options.duration) || 15));
+  const count = Math.ceil(fps * duration);
+  if (count > 7200) throw new Error('This export is too long for a single render job.');
+  const id = randomUUID();
+  const directory = path.join(app.getPath('temp'), 'aiva-export-' + id);
+  await fsp.mkdir(directory, { recursive: true });
+  JOBS.set(id, { directory, fps, duration, count, written: 0, canceled: false });
+  return { id, frameCount: count };
+});
+
+ipcMain.handle('ffmpeg:write-frame', async (_event, id, index, dataUrl) => {
+  const job = JOBS.get(id);
+  if (!job || job.canceled) throw new Error('Export session is no longer active.');
+  if (!Number.isInteger(index) || index < 0 || index >= job.count) throw new Error('Invalid export frame index.');
+  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) throw new Error('Invalid frame payload.');
+  const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  if (!buffer.length || buffer.length > 20 * 1024 * 1024) throw new Error('Invalid or oversized frame.');
+  await fsp.writeFile(path.join(job.directory, 'frame-' + String(index).padStart(5, '0') + '.png'), buffer);
+  job.written++;
+  if (job.written % 10 === 0) mainWindow?.webContents.send('export:progress', { phase: 'frames', value: job.written / job.count });
+  return { written: job.written };
+});
+
+ipcMain.handle('ffmpeg:finish', async (_event, id) => {
+  const job = JOBS.get(id);
+  if (!job) throw new Error('Export session not found.');
+  if (job.written !== job.count) throw new Error('Frame sequence is incomplete: ' + job.written + ' / ' + job.count + '.');
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: 'AI-Video-Agent.mp4',
+    filters: [{ name: 'MP4 video', extensions: ['mp4'] }]
+  });
+  if (result.canceled || !result.filePath) {
+    await fsp.rm(job.directory, { recursive: true, force: true });
+    JOBS.delete(id);
+    return { canceled: true };
+  }
+  const output = result.filePath.toLowerCase().endsWith('.mp4') ? result.filePath : result.filePath + '.mp4';
+  const partial = output.replace(/\.mp4$/i, '.partial.mp4');
+  const args = [
+    '-hide_banner', '-y', '-framerate', String(job.fps),
+    '-start_number', '0', '-i', path.join(job.directory, 'frame-%05d.png'),
+    '-frames:v', String(job.count), '-c:v', 'libx264',
+    '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+    '-movflags', '+faststart', partial
+  ];
+  const binary = getFfmpegPath();
+  await new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', chunk => {
+      const chunkText = chunk.toString();
+      stderr = (stderr + chunkText).slice(-5000);
+      const match = chunkText.match(/frame=\s*(\d+)/);
+      if (match) mainWindow?.webContents.send('export:progress', { phase: 'encoding', value: Math.min(0.99, Number(match[1]) / job.count) });
+    });
+    child.once('error', reject);
+    child.once('close', code => {
+      if (code === 0) resolve();
+      else reject(new Error('FFmpeg exited with code ' + code + ': ' + stderr.slice(-1200)));
+    });
+  }).then(async () => {
+    await fsp.rename(partial, output);
+  }).catch(async error => {
+    await fsp.rm(partial, { force: true });
+    throw error;
+  }).finally(async () => {
+    await fsp.rm(job.directory, { recursive: true, force: true });
+    JOBS.delete(id);
+  });
+  const stat = await fsp.stat(output);
+  mainWindow?.webContents.send('export:progress', { phase: 'done', value: 1 });
+  return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg' };
+});
+
+ipcMain.handle('ffmpeg:cancel', async (_event, id) => {
+  const job = JOBS.get(id);
+  if (job) {
+    job.canceled = true;
+    await fsp.rm(job.directory, { recursive: true, force: true });
+    JOBS.delete(id);
+  }
+  return true;
+});
+
+app.whenReady().then(async () => {
+  await fsp.mkdir(CONFIG(), { recursive: true });
+  await fsp.mkdir(PROJECTS(), { recursive: true });
+  const appearance = readConfig('theme', { mode: 'light' });
+  nativeTheme.themeSource = appearance.mode === 'system' ? 'system' : appearance.mode === 'dark' ? 'dark' : 'light';
+  createMainWindow();
+  buildMenu();
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+  });
+});
+
+app.on('before-quit', async () => {
+  for (const [id, job] of JOBS) {
+    job.canceled = true;
+    await fsp.rm(job.directory, { recursive: true, force: true }).catch(() => {});
+    JOBS.delete(id);
+  }
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') app.quit();
+});
