@@ -60,7 +60,7 @@
           ]
         }
       ],
-      "artifactName": "AI-Video-Agent-${version}-${arch}-${target}.${ext}"
+      "artifactName": "AI-Video-Agent-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -68,7 +68,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "AI Video Agent",
-      "differentialPackage": false
+      "differentialPackage": false,
+      "artifactName": "AI-Video-Agent-${version}-${arch}-setup.${ext}"
     },
     "portable": {
       "artifactName": "AI-Video-Agent-${version}-${arch}-portable.${ext}"
