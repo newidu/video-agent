@@ -1162,9 +1162,16 @@
   }
 
   function toolState(name) {
-    if (toolStates[name]) return toolStates[name];
     if (['get_project','replace_spec','verify_video'].indexOf(name) >= 0) return 'on';
-    return 'lazy';
+    const integrations=settingsData && settingsData.integrations || {};
+    const gated={generate_captions:'captions',generate_voiceover:'tts',remove_silence:'ffmpeg',list_motion_presets:'motionLibrary',apply_motion_preset:'motionLibrary'};
+    const gate=gated[name];
+    if(gate){
+      const available=gate==='ffmpeg' ? ffmpegAvailable : Boolean(integrations[gate]);
+      if(!available)return 'off';
+    }
+    if (toolStates[name]) return toolStates[name];
+    return gate ? 'on' : 'lazy';
   }
   function installToolPolicy() {
     if (window.__AIVA_TOOL_POLICY__) return;
