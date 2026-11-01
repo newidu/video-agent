@@ -58,6 +58,13 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     saveBrandKit: value => invoke('brand:save', value),
     getBrandKit: () => invoke('brand:get')
   },
+  motion: {
+    list: () => invoke('motion:list'),
+    get: id => invoke('motion:get', id),
+    save: value => invoke('motion:save', value),
+    saveLottie: value => invoke('motion:save-lottie', value),
+    remove: id => invoke('motion:delete', id)
+  },
   media: {
     getPathForFile: file => webUtils.getPathForFile(file),
     detectSilence: options => invoke('media:detect-silence', options),
