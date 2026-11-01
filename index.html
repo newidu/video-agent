@@ -982,6 +982,27 @@ function renderFrame(time) {
     try { drawEl(sc, el, i, lt); } catch (err) { console.warn('element', el && el.type, err); }
   });
   drawCrops(time);
+  const transition=sc.spec.transitionIn;
+  if(transition && typeof transition==='object' && lt<Math.max(0.05,Number(transition.duration)||0.45)){
+    const progress=clamp(lt/Math.max(0.05,Number(transition.duration)||0.45));
+    ctx.save();
+    ctx.globalAlpha=1;
+    ctx.fillStyle=sc.spec.bg || '#000000';
+    const type=transition.type||'fade';
+    if(type==='wipe-left'){
+      const width=W*(1-progress);ctx.fillRect(W-width,0,width,H);
+    }else if(type==='wipe-right'){
+      ctx.fillRect(0,0,W*(1-progress),H);
+    }else if(type==='wipe-up'){
+      const height=H*(1-progress);ctx.fillRect(0,H-height,W,height);
+    }else if(type==='wipe-down'){
+      ctx.fillRect(0,0,W,H*(1-progress));
+    }else{
+      ctx.globalAlpha=1-progress;
+      ctx.fillRect(0,0,W,H);
+    }
+    ctx.restore();
+  }
   if (typeof window.AIVA_DRAW_BRAND_LOGO === 'function') {
     try { window.AIVA_DRAW_BRAND_LOGO(); } catch (error) { console.warn('Brand Kit overlay could not render.', error); }
   }
