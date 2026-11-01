@@ -4392,13 +4392,17 @@ async function execToolCalls(acc, cur, messages) {
               save.title = 'Save frame…';
               save.setAttribute('aria-label', 'Save frame');
               save.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 17v4h14v-4"/></svg><span>Save frame</span>';
-              save.addEventListener('click', async () => {
+              save.onclick = async () => {
                 save.disabled = true;
                 try {
                   const result = await window.aiva.export.image(r.thumb, r.frameName);
                   if (result && result.saved) {
                     const status = document.getElementById('status');
                     if (status) status.textContent = 'Saved · ' + result.path + ' · ' + Math.round(result.bytes / 1024) + ' KB';
+                    save.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h7l2 2h9v10H3z"/><path d="M3 7V5h7l2 2"/></svg><span>Open folder</span>';
+                    save.title = 'Show the saved frame in File Explorer';
+                    save.onclick = () => window.aiva.export.revealFile(result.path);
+                    return;
                   }
                 } catch (error) {
                   const status = document.getElementById('status');
@@ -4406,7 +4410,7 @@ async function execToolCalls(acc, cur, messages) {
                 } finally {
                   save.disabled = false;
                 }
-              });
+              };
               actions.appendChild(save);
               frameCard.appendChild(actions);
             }
