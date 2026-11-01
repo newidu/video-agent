@@ -602,7 +602,7 @@ ipcMain.handle('share:html', async (_event, input) => {
   const playerSource=await fsp.readFile(path.join(ROOT,'engine.player.js'),'utf8');
   const sceneCode=(project.spec.scenes||[]).flatMap(scene=>(scene.elements||[]).map(element=>String(element.js||''))).join('\n');
   const needsLottie=Object.keys(project.spec.motionAssets||{}).length>0;
-  const needsThree=/H\\.(?:cube3D|sphere3D)\\s*\\(/.test(sceneCode);
+  const needsThree=sceneCode.includes('H.cube3D')||sceneCode.includes('H.sphere3D');
   const vendorScripts=[];
   if(needsLottie){
     const lottiePath=path.join(ROOT,'node_modules','lottie-web','build','player','lottie.js');
