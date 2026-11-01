@@ -177,3 +177,17 @@ html[data-view="settings"][data-theme="dark"] .settings-shell{background:rgba(26
  .settings-main{padding:18px 14px}
  .provider-layout{grid-template-columns:1fr}
 }
+
+
+.share-popover{
+ position:fixed;z-index:95;top:58px;right:12px;width:270px;padding:8px;
+ background:rgba(255,255,255,.97);border:1px solid var(--line);border-radius:11px;
+ box-shadow:var(--shadow-pop);backdrop-filter:blur(22px);display:flex;flex-direction:column;gap:5px
+}
+[data-theme="dark"] .share-popover{background:rgba(26,26,26,.97)}
+.share-title{font-size:11px;font-weight:650;padding:6px 8px 7px;color:var(--txt)}
+.share-popover button{display:flex;flex-direction:column;align-items:flex-start;gap:3px;
+ background:transparent;border:0;padding:9px 10px;text-align:left;border-radius:7px;color:var(--txt)}
+.share-popover button:hover{background:var(--panel2)}
+.share-popover strong{font-size:11px;font-weight:600}
+.share-popover small{font-size:9.5px;color:var(--muted);font-weight:400}
