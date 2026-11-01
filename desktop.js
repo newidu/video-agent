@@ -84,6 +84,8 @@
     const shareButton = ensureSvgButton('btnShare', 'Share project',
       '<path d="M12 16V3m-5 5 5-5 5 5"/><path d="M5 13v7h14v-7"/>');
     const historyButton = ensureSvgButton('btnVersionHistory', 'Version history',
+      '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>');
+    const historyButton = ensureSvgButton('btnVersionHistory', 'Version history',
       '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>');
     const title = document.createElement('button');
     title.id = 'btnProjectName';
@@ -1363,8 +1365,16 @@
     const gated={generate_captions:'captions',generate_voiceover:'tts',remove_silence:'ffmpeg',list_motion_presets:'motionLibrary',apply_motion_preset:'motionLibrary'};
     const gate=gated[name];
     if(gate){
-      const available=gate==='ffmpeg' ? ffmpegAvailable : Boolean(integrations[gate]);
-      if(!available)return 'off';
+      const available = gate === 'ffmpeg'
+        ? ffmpegAvailable && integrations.ffmpeg !== false
+        : gate === 'captions'
+          ? Boolean(integrations.captions && integrations.captions.enabled && integrations.captions.tested)
+          : gate === 'tts'
+            ? Boolean(integrations.tts && integrations.tts.enabled && integrations.tts.tested)
+            : gate === 'motionLibrary'
+              ? integrations.motionLibrary !== false
+              : false;
+      if (!available) return 'off';
     }
     if (toolStates[name]) return toolStates[name];
     return gate ? 'on' : 'lazy';
@@ -1849,7 +1859,15 @@
     };
     const rows = names.map(name => {
       const gate = gates[name];
-      const unavailable = !!gate && !(gate === 'ffmpeg' ? ffmpegAvailable : Boolean(integrations[gate]));
+      const unavailable = !!gate && !(gate === 'ffmpeg'
+        ? ffmpegAvailable && integrations.ffmpeg !== false
+        : gate === 'captions'
+          ? Boolean(integrations.captions && integrations.captions.enabled && integrations.captions.tested)
+          : gate === 'tts'
+            ? Boolean(integrations.tts && integrations.tts.enabled && integrations.tts.tested)
+            : gate === 'motionLibrary'
+              ? integrations.motionLibrary !== false
+              : false);
       const value = core.indexOf(name) >= 0 ? 'on' : unavailable ? 'off' : (state[name] || (gate ? 'on' : 'lazy'));
       const description = (TOOL_HELP[name] || '').split(/(?<=\.)\s/)[0].slice(0,100);
       return '<div class="settings-list-row"><div><strong>' + escapeHtml(name) + '</strong><small>' +
@@ -1915,8 +1933,8 @@
         '<div class="integration-actions"><button id="testTts">Test API connection</button><span id="ttsStatus" class="integration-status">' + (tts.tested ? 'Connected · endpoint tested' : tts.keyConfigured ? 'Key saved · test required' : 'Not connected') + '</span></div></div>') +
       settingCard('Native video export & optional tools',
         'FFmpeg is bundled with the Windows build. Motion library is local and does not require an API key.',
-        settingRow('FFmpeg H.264 / AAC export','Native frame-exact export. Hardware encoder is detected automatically when supported.',
-          '<input type="checkbox" checked disabled title="Bundled FFmpeg is enabled by default">') +
+        settingRow('Enable FFmpeg export','Use the bundled native encoder for MP4 export and silence processing.',
+          '<input id="intFfmpegOn" type="checkbox"' + (info.ffmpeg !== false && ffmpegAvailable ? ' checked' : '') + (ffmpegAvailable ? '' : ' disabled title="Bundled FFmpeg binary is unavailable"') + '>') +
         settingRow('Motion code library','Reusable canvas-code presets and agent-authored motion graphics.',
           '<input id="intMotionLibrary" type="checkbox"' + (info.motionLibrary !== false?' checked':'') + '>') +
         '<div class="setting-actions"><button id="saveIntegrations" class="primary">Save integration switches</button></div>')];
@@ -1953,7 +1971,7 @@
     $id('saveIntegrations').onclick = async () => {
       try {
         settingsData.integrations = await A.settings.saveIntegrations({
-          ffmpeg:true,
+          ffmpeg:$id('intFfmpegOn').checked,
           captions:{
             enabled:$id('intCaptionsOn').checked,
             base_url:$id('intCaptionsUrl').value.trim(),
