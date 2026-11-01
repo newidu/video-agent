@@ -4587,7 +4587,11 @@ function normalizeSpec(s) {
 function applyAgentResult(obj) {
   if (!obj) return;
   if (obj.action === 'replace' && obj.spec) {
+    const preservedVoiceover = SPEC && SPEC.voiceover;
+    const preservedMotionAssets = SPEC && SPEC.motionAssets;
     SPEC = normalizeSpec(obj.spec);
+    if (!SPEC.voiceover && preservedVoiceover) SPEC.voiceover = preservedVoiceover;
+    if (!SPEC.motionAssets && preservedMotionAssets) SPEC.motionAssets = preservedMotionAssets;
     EDIT.items = {}; EDIT.scenes = {}; EDIT.base = {};
     SELECTED = null;
     buildScenes(); syncSpec();
