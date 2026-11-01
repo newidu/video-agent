@@ -1279,6 +1279,24 @@ ipcMain.handle('ffmpeg:begin', async (_event, options) => {
   const directory = path.join(app.getPath('temp'), 'aiva-export-' + id);
   await fsp.mkdir(directory, { recursive: true });
   let audioPath = null;
+  let voiceoverAudioPath = null;
+  if (typeof options.voiceoverDataUrl === 'string' && options.voiceoverDataUrl.startsWith('data:audio/')) {
+    const comma = options.voiceoverDataUrl.indexOf(',');
+    if (comma < 0 || !options.voiceoverDataUrl.slice(0, comma).includes(';base64')) {
+      await fsp.rm(directory, { recursive: true, force: true });
+      throw new Error('The voiceover file is not a valid base64 audio data URL.');
+    }
+    const mime = options.voiceoverDataUrl.slice(5, options.voiceoverDataUrl.indexOf(';')).toLowerCase();
+    const voiceExtensions = { 'audio/mpeg':'mp3','audio/mp3':'mp3','audio/wav':'wav','audio/x-wav':'wav','audio/mp4':'m4a','audio/aac':'aac' };
+    const extension = voiceExtensions[mime];
+    const bytes = Buffer.from(options.voiceoverDataUrl.slice(comma + 1), 'base64');
+    if (!extension || !bytes.length || bytes.length > 100 * 1024 * 1024) {
+      await fsp.rm(directory, { recursive: true, force: true });
+      throw new Error('Voiceover audio must be a supported, non-empty file smaller than 100 MB.');
+    }
+    voiceoverAudioPath = path.join(directory, 'voiceover.' + extension);
+    await fsp.writeFile(voiceoverAudioPath, bytes);
+  }
   if (typeof options.audioDataUrl === 'string' && options.audioDataUrl.startsWith('data:')) {
     const comma = options.audioDataUrl.indexOf(',');
     if (comma < 0 || !options.audioDataUrl.slice(0, comma).includes(';base64')) {
@@ -1330,11 +1348,12 @@ ipcMain.handle('ffmpeg:begin', async (_event, options) => {
     }
   }
   JOBS.set(id, {
-    directory, fps, duration, count, ext, audioPath, sourceAudioPath,
+    directory, fps, duration, count, ext, audioPath, sourceAudioPath, voiceoverAudioPath,
     audioVolume: Math.max(0, Math.min(1, Number(options.audioVolume) || 0.8)),
+    voiceoverVolume: Math.max(0, Math.min(1, Number(options.voiceoverVolume) || 1)),
     written: 0, canceled: false, child: null
   });
-  return { id, frameCount: count, hasAudio: Boolean(audioPath) };
+  return { id, frameCount: count, hasAudio: Boolean(audioPath || sourceAudioPath || voiceoverAudioPath) };
 });
 
 ipcMain.handle('ffmpeg:write-frame', async (_event, id, index, dataUrl) => {
@@ -1375,28 +1394,34 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
     '-start_number', '0', '-i', frames
   ];
   let audioInputIndex=1;
-  let sourceAudioIndex=null;
-  let musicAudioIndex=null;
+  const audioTracks=[];
   if(job.sourceAudioPath){
-    sourceAudioIndex=audioInputIndex++;
+    const index=audioInputIndex++;
     args.push('-i',job.sourceAudioPath);
+    audioTracks.push({index,label:'source',volume:1});
   }
   if(job.audioPath){
-    musicAudioIndex=audioInputIndex++;
+    const index=audioInputIndex++;
     args.push('-stream_loop','-1','-i',job.audioPath);
+    audioTracks.push({index,label:'music',volume:job.audioVolume});
+  }
+  if(job.voiceoverAudioPath){
+    const index=audioInputIndex++;
+    args.push('-i',job.voiceoverAudioPath);
+    audioTracks.push({index,label:'voice',volume:job.voiceoverVolume});
   }
   args.push('-t',String(job.duration),'-map','0:v:0');
-  if(sourceAudioIndex!==null && musicAudioIndex!==null){
-    const volume=job.audioVolume.toFixed(3);
-    args.push(
-      '-filter_complex',
-      '['+sourceAudioIndex+':a:0]aresample=48000[source];['+musicAudioIndex+':a:0]volume='+volume+',aresample=48000[music];[source][music]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[aout]',
-      '-map','[aout]','-c:a','aac','-b:a','192k'
+  if(audioTracks.length===1){
+    const track=audioTracks[0];
+    if(track.volume!==1)args.push('-map',track.index+':a:0','-filter:a','volume='+track.volume.toFixed(3),'-c:a','aac','-b:a','192k');
+    else args.push('-map',track.index+':a:0','-c:a','aac','-b:a','192k');
+  }else if(audioTracks.length>1){
+    const filters=audioTracks.map((track,index)=>
+      '['+track.index+':a:0]volume='+track.volume.toFixed(3)+',aresample=48000[a'+index+']'
     );
-  }else if(sourceAudioIndex!==null){
-    args.push('-map',sourceAudioIndex+':a:0','-c:a','aac','-b:a','192k');
-  }else if(musicAudioIndex!==null){
-    args.push('-map',musicAudioIndex+':a:0','-filter:a','volume='+job.audioVolume.toFixed(3),'-c:a','aac','-b:a','192k');
+    const inputs=audioTracks.map((_track,index)=>'[a'+index+']').join('');
+    filters.push(inputs+'amix=inputs='+audioTracks.length+':duration=longest:dropout_transition=2:normalize=0[aout]');
+    args.push('-filter_complex',filters.join(';'),'-map','[aout]','-c:a','aac','-b:a','192k');
   }
   const binary=getFfmpegPath();
   if(!binary)throw new Error('Bundled FFmpeg is not available.');
@@ -1448,7 +1473,7 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
     await fsp.rename(partial, output);
     const stat = await fsp.stat(output);
     mainWindow?.webContents.send('export:progress', { phase: 'done', value: 1 });
-    return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg', encoder, audio: Boolean(job.audioPath || job.sourceAudioPath), sourceAudio: Boolean(job.sourceAudioPath), musicOrVoiceover: Boolean(job.audioPath) };
+    return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg', encoder, audio: Boolean(job.audioPath || job.sourceAudioPath || job.voiceoverAudioPath), sourceAudio: Boolean(job.sourceAudioPath), music: Boolean(job.audioPath), voiceover: Boolean(job.voiceoverAudioPath) };
   } catch (error) {
     const partialStat=await fsp.stat(partial).catch(()=>null);
     if(partialStat && partialStat.size>0) {
