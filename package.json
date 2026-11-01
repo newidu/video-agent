@@ -8,7 +8,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "check:syntax": "node --check main.js && node --check preload.js && node --check desktop.js && node --check engine.player.js",
+    "check:syntax": "node --check main.js && node --check preload.js && node --check desktop.js && node --check engine.player.js && node scripts/check-prototype.js",
     "test": "npm run check:syntax",
     "dist:win": "electron-builder --win nsis portable --x64 --publish never",
     "dist:win:release": "electron-builder --win nsis portable --x64 --publish always"
