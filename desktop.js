@@ -454,14 +454,31 @@
     const payload = currentProjectData();
     if (!payload) return;
     try {
+      if ($id('saveIndicator')) $id('saveIndicator').classList.add('saving');
       await A.project.save(payload);
+      if ($id('saveIndicator')) {
+        $id('saveIndicator').classList.remove('saving','error');
+        $id('saveIndicator').classList.add('saved');
+        $id('saveIndicator').title = 'All changes saved';
+      }
       status('Saved · ' + projectName);
+      renderProjectSidebar();
     } catch (error) {
+      if ($id('saveIndicator')) {
+        $id('saveIndicator').classList.remove('saving','saved');
+        $id('saveIndicator').classList.add('error');
+        $id('saveIndicator').title = 'Save failed';
+      }
       status('Save failed · ' + (error.message || error));
     }
   }
   function scheduleSave() {
     if (!projectId || loadingProject || window.__EXPORTING) return;
+    if ($id('saveIndicator')) {
+      $id('saveIndicator').classList.remove('saved','error');
+      $id('saveIndicator').classList.add('saving');
+      $id('saveIndicator').title = 'Saving changes…';
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(persistNow, 1200);
   }
@@ -1346,8 +1363,10 @@
 
   async function initStudio() {
     installAutosaveHooks();
-    installStudioChrome();
+    injectStudioChrome();
+    installProjectSidebar();
     installProjectGallery();
+    installSelectionContext();
     installSecureAgent();
     installToolPolicy();
     installPlayerControls();
@@ -1356,21 +1375,23 @@
     if ($id('btnSave')) $id('btnSave').onclick = saveProject;
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     try {
-      const pair = await Promise.all([A.app.info(),A.settings.get()]);
+      const pair = await Promise.all([A.app.info(),A.settings.get(),A.ui.get()]);
       ffmpegAvailable = !!pair[0].ffmpegAvailable;
       toolStates = pair[1].tools && pair[1].tools.state || {};
       applyAppearance(pair[1].appearance);
+      document.body.classList.toggle('sidebar-hidden',!!pair[2].sidebarHidden);
+      document.body.classList.toggle('agent-hidden',!!pair[2].agentHidden);
       await loadProviderConfig();
       if ($id('btnExport')) $id('btnExport').title = ffmpegAvailable ? 'Export MP4 · FFmpeg' : 'Export video';
       if ($id('btnSave')) $id('btnSave').title = 'Save project';
-      if ($id('btnClearChat')) {
-        $id('btnClearChat').addEventListener('click',scheduleSave);
-      }
-      status('Ready · New project opens empty.');
-      // New installations deliberately open an empty stage, not a demo scene.
+      if ($id('btnClearChat')) $id('btnClearChat').addEventListener('click',scheduleSave);
+      status('Ready · Describe → watch → refine.');
       if ($id('chat') && !$id('chat').children.length) {
-        agentStatus(providerReady ? 'Describe the video you want to create.' : 'Add a provider key in Settings to start.');
+        agentStatus(providerReady ? 'Choose a project or create a new one.' : 'Choose a project, then add an AI provider in Settings.');
       }
+      const projects = await A.project.list();
+      await renderProjectSidebar();
+      if (!projects.length && !projectId) openNewProjectWizard();
     } catch (error) { agentStatus('Desktop startup failed · ' + error.message); }
   }
 
@@ -1387,8 +1408,30 @@
 
   window.addEventListener('keydown', event => {
     if (window.__EXPORTING) return;
+    const target = event.target;
+    const typing = target && (
+      target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' ||
+      target.tagName === 'SELECT' || target.isContentEditable
+    );
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault(); persistNow();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+      event.preventDefault(); openNewProjectWizard();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'o') {
+      event.preventDefault(); openProjectGallery();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b' && !typing) {
+      event.preventDefault();
+      document.body.classList.toggle('agent-hidden');
+      persistUiState();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !typing) {
+      event.preventDefault();
+      document.body.classList.remove('sidebar-hidden');
+      $id('projectSearch')?.focus();
+      persistUiState();
     }
     if ((event.ctrlKey || event.metaKey) && event.key === ',') {
       event.preventDefault();
@@ -1399,6 +1442,7 @@
   if (view === 'settings') initSettings();
   else {
     injectStudioChrome();
+    installProjectSidebar();
     installProjectGallery();
     initStudio();
   }
