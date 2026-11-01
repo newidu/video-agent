@@ -1845,8 +1845,25 @@ async function exportVideo() {
   }
 }
 
-function exportPoster() {
-  stage.toBlob(b => download(b, 'ai-video-poster.png'), 'image/png');
+async function exportPoster() {
+  try {
+    const payload = stage.toDataURL('image/png');
+    if (payload.length < 1000 || !payload.startsWith('data:image/png;base64,')) {
+      throw new Error('The current frame is empty or could not be captured.');
+    }
+    if (window.aiva && window.aiva.export) {
+      const result = await window.aiva.export.image(payload, 'ai-video-poster.png');
+      if (result && result.saved) document.getElementById('status').textContent =
+        'Saved · ' + result.path + ' · ' + Math.round(result.bytes / 1024) + ' KB';
+      return result;
+    }
+    const response = await fetch(payload);
+    download(await response.blob(), 'ai-video-poster.png');
+    return { saved: true };
+  } catch (error) {
+    document.getElementById('status').textContent = 'Poster save failed · ' + (error.message || error);
+    return { error: error.message || String(error) };
+  }
 }
 
 /* ---------------- project save / load ---------------- */
@@ -3680,12 +3697,25 @@ const TOOL_IMPL = {
   },
   grab_frame(args) {
     const t = Math.max(0, Math.min(DUR - 0.001, +(args && args.time !== undefined ? args.time : time)));
-    setTime(t); renderFrame(t); drawOverlay();
+    setTime(t);
+    renderFrame(t);
+    drawOverlay();
     const stats = frameStats();
     const name = 'frame-' + t.toFixed(2) + 's.png';
-    stage.toBlob(b => download(b, name), 'image/png');
     const thumb = stage.toDataURL('image/png');
-    return { text: JSON.stringify({ saved: name, time: +t.toFixed(2), size: W + 'x' + H, bytes: '~' + Math.round(thumb.length * 0.75 / 1024) + ' KB', mean: stats.mean, palette: stats.palette }), thumb: thumb };
+    return {
+      text: JSON.stringify({
+        frame: 'preview ready',
+        time: +t.toFixed(2),
+        size: W + 'x' + H,
+        bytes: '~' + Math.round(thumb.length * 0.75 / 1024) + ' KB',
+        mean: stats.mean,
+        palette: stats.palette,
+        save: 'Use the save icon under the preview to choose a destination.'
+      }),
+      thumb,
+      frameName: name
+    };
   },
   list_skill_files() { return SKILL_ORDER.join('\n'); },
   read_skill(args) {
@@ -4213,10 +4243,41 @@ async function execToolCalls(acc, cur, messages) {
         if (r && typeof r === 'object' && (r.text || r.thumb)) {
           out = r.text;
           if (r.thumb) {
+            const frameCard = document.createElement('div');
+            frameCard.className = 'frame-preview-card';
             const img = document.createElement('img');
             img.className = 'thumb';
+            img.alt = 'Video frame preview';
             img.src = r.thumb;
-            cur.step.appendChild(img);
+            frameCard.appendChild(img);
+            if (r.frameName && window.aiva && window.aiva.export) {
+              const actions = document.createElement('div');
+              actions.className = 'frame-preview-actions';
+              const save = document.createElement('button');
+              save.type = 'button';
+              save.className = 'frame-save icon';
+              save.title = 'Save frame…';
+              save.setAttribute('aria-label', 'Save frame');
+              save.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M5 17v4h14v-4"/></svg><span>Save frame</span>';
+              save.addEventListener('click', async () => {
+                save.disabled = true;
+                try {
+                  const result = await window.aiva.export.image(r.thumb, r.frameName);
+                  if (result && result.saved) {
+                    const status = document.getElementById('status');
+                    if (status) status.textContent = 'Saved · ' + result.path + ' · ' + Math.round(result.bytes / 1024) + ' KB';
+                  }
+                } catch (error) {
+                  const status = document.getElementById('status');
+                  if (status) status.textContent = 'Frame save failed · ' + (error.message || error);
+                } finally {
+                  save.disabled = false;
+                }
+              });
+              actions.appendChild(save);
+              frameCard.appendChild(actions);
+            }
+            cur.step.appendChild(frameCard);
           }
         } else out = (typeof r === 'string') ? r : JSON.stringify(r);
       }
