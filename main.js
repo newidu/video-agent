@@ -1347,38 +1347,53 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
   }else if(musicAudioIndex!==null){
     args.push('-map',musicAudioIndex+':a:0','-filter:a','volume='+job.audioVolume.toFixed(3),'-c:a','aac','-b:a','192k');
   }
+  const binary=getFfmpegPath();
+  if(!binary)throw new Error('Bundled FFmpeg is not available.');
   let encoder='libx264';
   let encoderArgs=['-preset','medium','-crf','18'];
   try{
     const detected=await runFfmpeg(binary,['-hide_banner','-encoders'],30000);
-    const available=detected.stdout+'\\n'+detected.stderr;
+    const available=detected.stdout+'\n'+detected.stderr;
     if(/h264_nvenc/.test(available)){encoder='h264_nvenc';encoderArgs=['-preset','p4','-cq','19'];}
     else if(/h264_qsv/.test(available)){encoder='h264_qsv';encoderArgs=['-preset','medium','-global_quality','20'];}
     else if(/h264_amf/.test(available)){encoder='h264_amf';encoderArgs=['-quality','balanced','-qp_i','20','-qp_p','20'];}
   }catch(error){console.warn('Encoder detection failed; using libx264.',error);}
   args.push('-frames:v',String(job.count),'-c:v',encoder,...encoderArgs,'-pix_fmt','yuv420p','-movflags','+faststart',partial);
-  const binary = getFfmpegPath();
-  try {
-    await new Promise((resolve, reject) => {
-      const child = spawn(binary, args, { windowsHide: true });
-      job.child = child;
-      let stderr = '';
-      child.stderr.on('data', chunk => {
-        const chunkText = chunk.toString();
-        stderr = (stderr + chunkText).slice(-5000);
-        const match = chunkText.match(/frame=\s*(\d+)/);
-        if (match) mainWindow?.webContents.send('export:progress', {
-          phase: 'encoding', value: Math.min(0.99, Number(match[1]) / job.count)
-        });
-      });
-      child.once('error', reject);
-      child.once('close', code => {
-        job.child = null;
-        if (job.canceled) reject(new Error('Export cancelled.'));
-        else if (code === 0) resolve();
-        else reject(new Error('FFmpeg exited with code ' + code + ': ' + stderr.slice(-1200)));
+  const runEncoder=encodeArgs=>new Promise((resolve,reject)=>{
+    const child=spawn(binary,encodeArgs,{windowsHide:true});
+    job.child=child;
+    let stderr='';
+    child.stderr.on('data',chunk=>{
+      const chunkText=chunk.toString();
+      stderr=(stderr+chunkText).slice(-5000);
+      const match=chunkText.match(/frame=\s*(\d+)/);
+      if(match)mainWindow?.webContents.send('export:progress',{
+        phase:'encoding',value:Math.min(0.99,Number(match[1])/job.count)
       });
     });
+    child.once('error',error=>{job.child=null;reject(error);});
+    child.once('close',code=>{
+      job.child=null;
+      if(job.canceled)reject(new Error('Export cancelled.'));
+      else if(code===0)resolve();
+      else reject(new Error('FFmpeg exited with code '+code+': '+stderr.slice(-1200)));
+    });
+  });
+  try {
+    try{
+      await runEncoder(args);
+    }catch(hardwareError){
+      if(encoder==='libx264'||job.canceled)throw hardwareError;
+      await fsp.rm(partial,{force:true});
+      const codecIndex=args.indexOf('-c:v');
+      const suffixStart=codecIndex+2+encoderArgs.length;
+      const fallbackArgs=[
+        ...args.slice(0,codecIndex+1),'libx264','-preset','medium','-crf','18',
+        ...args.slice(suffixStart)
+      ];
+      encoder='libx264';
+      await runEncoder(fallbackArgs);
+    }
     await fsp.rename(partial, output);
     const stat = await fsp.stat(output);
     mainWindow?.webContents.send('export:progress', { phase: 'done', value: 1 });
