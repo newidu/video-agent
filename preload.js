@@ -105,10 +105,5 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('brand:changed', listener);
     return () => ipcRenderer.removeListener('brand:changed', listener);
-  },
-  onBrandChanged: callback => {
-    const listener = (_event, value) => callback(value);
-    ipcRenderer.on('brand:changed', listener);
-    return () => ipcRenderer.removeListener('brand:changed', listener);
   }
 }));
