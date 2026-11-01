@@ -97,7 +97,7 @@ function getFfmpegPath() {
 function makeWindowOptions(kind) {
   const isWindows = process.platform === 'win32';
   const releaseParts = os.release().split('.').map(Number);
-  const isWin11 = isWindows && releaseParts[0] >= 10 && (releaseParts[2] || 0) >= 22000;
+  const isWin11 = isWindows && releaseParts[0] >= 10 && (releaseParts[2] || 0) >= 22621;
   const settings = kind === 'settings';
   const base = {
     width: settings ? 720 : 1440,
@@ -251,7 +251,8 @@ function validateProject(input) {
     duration: Math.max(1, Math.min(120, Number(input.duration) || 15)),
     playhead: Math.max(0, Math.min(120, Number(input.playhead) || 0)),
     background: /^#[0-9a-fA-F]{6}$/.test(input.background) ? input.background : '#111111',
-    items: Array.isArray(input.items) ? input.items.slice(0, 500) : [],
+    items: input.items && typeof input.items === 'object' ? input.items : [],
+    edit: input.edit && typeof input.edit === 'object' ? input.edit : undefined,
     chat: Array.isArray(input.chat) ? input.chat.slice(-300) : [],
     updatedAt: Date.now()
   };
@@ -263,7 +264,7 @@ ipcMain.handle('app:info', () => ({
   platform: process.platform,
   userData: DATA(),
   ffmpegAvailable: Boolean(getFfmpegPath()),
-  materialSupported: process.platform === 'win32' && (Number(os.release().split('.')[2]) || 0) >= 22000
+  materialSupported: process.platform === 'win32' && (Number(os.release().split('.')[2]) || 0) >= 22621
 }));
 
 ipcMain.handle('window:settings', () => { openSettingsWindow(); return true; });
@@ -364,6 +365,7 @@ ipcMain.handle('providers:test', async (_event, input) => {
   return { connected: true, models };
 });
 
+const AI_REQUESTS = new Map();
 ipcMain.handle('ai:chat', async (_event, input) => {
   const data = readConfig('providers', { active: null, providers: [] });
   const provider = (data.providers || []).find(p => p.id === (input.providerId || data.active));
@@ -377,25 +379,38 @@ ipcMain.handle('ai:chat', async (_event, input) => {
   const body = {
     model,
     messages: Array.isArray(input.messages) ? input.messages.slice(-80) : [],
-    temperature: 0.4,
+    temperature: Number.isFinite(input.temperature) ? input.temperature : 0.6,
+    max_tokens: Math.max(128, Math.min(8192, Number(input.max_tokens) || 2400)),
     stream: false
   };
   if (Array.isArray(input.tools) && input.tools.length) {
     body.tools = input.tools;
-    body.tool_choice = 'auto';
+    body.tool_choice = input.tool_choice || 'auto';
   }
-  const response = await fetch(provider.base_url + '/chat/completions', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120000)
-  });
-  const raw = await response.text();
-  if (!response.ok) throw new Error('AI API HTTP ' + response.status + ': ' + raw.slice(0, 600));
-  let result;
-  try { result = JSON.parse(raw); } catch { throw new Error('The AI provider returned invalid JSON.'); }
-  if (!result.choices?.[0]?.message) throw new Error('The provider response did not include a chat message.');
-  return result.choices[0].message;
+  if (input.thinking && typeof input.thinking === 'object') body.thinking = input.thinking;
+  const requestId = String(input.requestId || randomUUID());
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('AI request timed out after 120 seconds.')), 120000);
+  AI_REQUESTS.set(requestId, controller);
+  try {
+    const response = await fetch(provider.base_url + '/chat/completions', {
+      method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal
+    });
+    const raw = await response.text();
+    if (!response.ok) throw new Error('AI API HTTP ' + response.status + ': ' + raw.slice(0, 600));
+    let result;
+    try { result = JSON.parse(raw); } catch { throw new Error('The AI provider returned invalid JSON.'); }
+    if (!result.choices?.[0]?.message) throw new Error('The provider response did not include a chat message.');
+    return { ...result.choices[0].message, usage: result.usage || null };
+  } finally {
+    clearTimeout(timeout);
+    AI_REQUESTS.delete(requestId);
+  }
+});
+ipcMain.handle('ai:cancel', (_event, requestId) => {
+  const controller = AI_REQUESTS.get(String(requestId || ''));
+  if (controller) controller.abort(new Error('Cancelled by user.'));
+  return Boolean(controller);
 });
 
 ipcMain.handle('settings:get', () => ({
@@ -562,6 +577,17 @@ ipcMain.handle('ffmpeg:cancel', async (_event, id) => {
 app.whenReady().then(async () => {
   await fsp.mkdir(CONFIG(), { recursive: true });
   await fsp.mkdir(PROJECTS(), { recursive: true });
+  const providerConfig = readConfig('providers', null);
+  if (!providerConfig || !Array.isArray(providerConfig.providers) || !providerConfig.providers.length) {
+    await writeConfig('providers', {
+      active: 'deepseek',
+      providers: [{
+        id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com',
+        models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
+        enabled_models: ['deepseek-v4-flash', 'deepseek-chat'], headers: {}, createdAt: Date.now()
+      }]
+    });
+  }
   const appearance = readConfig('theme', { mode: 'light' });
   nativeTheme.themeSource = appearance.mode === 'system' ? 'system' : appearance.mode === 'dark' ? 'dark' : 'light';
   createMainWindow();

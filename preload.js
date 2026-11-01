@@ -26,7 +26,8 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     test: provider => invoke('providers:test', provider)
   },
   ai: {
-    chat: payload => invoke('ai:chat', payload)
+    chat: payload => invoke('ai:chat', payload),
+    cancel: requestId => invoke('ai:cancel', requestId)
   },
   settings: {
     get: () => invoke('settings:get'),
