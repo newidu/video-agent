@@ -1987,11 +1987,16 @@
         settingRow('Accent colour','Calls to action and emphasis.','<input id="brandAccent" type="color" value="' + escapeHtml(brand.accent||'#C65A2E') + '">') +
         settingRow('Heading font','Font family name (must be installed or imported).','<input id="brandHeading" class="wide-input" value="' + escapeHtml(brand.headingFont||'Inter') + '">') +
         settingRow('Body font','Font family name (must be installed or imported).','<input id="brandBody" class="wide-input" value="' + escapeHtml(brand.bodyFont||'Inter') + '">') +
+        settingRow('Install a font','Load a TTF, OTF or WOFF file into this project, then enter its family name above.','<button id="brandImportFont" type="button">Import font file</button>') +
         settingRow('Logo','Optional transparent PNG, JPEG or SVG file.','<input id="brandLogo" type="file" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml">') +
         settingRow('Logo position','Choose where the logo appears in the output.','<select id="brandLogoPosition"><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select>') +
         settingRow('Show logo in all scenes','Persistent branding overlay.','<input id="brandUseLogo" type="checkbox"' + (brand.useLogo!==false?' checked':'') + '>') +
         '<div class="setting-actions"><button id="brandSave" class="primary">Save Brand Kit</button></div>');
     $id('brandLogoPosition').value=brand.logoPosition||'bottom-right';
+    $id('brandImportFont').onclick=()=>{
+      if($id('fontIn'))$id('fontIn').click();
+      settingsStatus('Choose a local font file. After it is imported, enter its family name in the heading/body field.',true);
+    };
     $id('brandSave').onclick=async()=>{
       try{
         let logoDataUrl='';
