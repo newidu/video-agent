@@ -1034,7 +1034,7 @@ function buildScenes() {
 function drawEmptyStage() { P.bg = '#FFFFFF'; }
 window.drawEmptyStage = drawEmptyStage;
 
-function renderFrame(time) {
+function renderFrameBase(time) {
   T = time;
   HITS = [];
   for (const k in DRAWN) delete DRAWN[k];
@@ -1074,7 +1074,7 @@ function renderFrame(time) {
   });
   drawCrops(time);
   const transition=sc.spec.transitionIn;
-  if(transition && typeof transition==='object' && lt<Math.max(0.05,Number(transition.duration)||0.45)){
+  if(!window.__AIVA_TRANSITION_COMPOSING__ && transition && typeof transition==='object' && lt<Math.max(0.05,Number(transition.duration)||0.45)){
     const progress=clamp(lt/Math.max(0.05,Number(transition.duration)||0.45));
     ctx.save();
     ctx.globalAlpha=1;
@@ -1098,6 +1098,74 @@ function renderFrame(time) {
     try { window.AIVA_DRAW_BRAND_LOGO(); } catch (error) { console.warn('Brand Kit overlay could not render.', error); }
   }
 }
+function renderFrame(time) {
+  const scene = SCENES.find(item => time >= item.in && time < item.out);
+  const index = scene ? SCENES.indexOf(scene) : -1;
+  const transition = scene && scene.spec && scene.spec.transitionIn;
+  const duration = transition && Math.max(0.05, Number(transition.duration) || 0.45);
+  const local = scene ? time - scene.in : 0;
+  if (window.__AIVA_TRANSITION_COMPOSING__ || !transition || index <= 0 || local >= duration) {
+    return renderFrameBase(time);
+  }
+
+  const previousScene = SCENES[index - 1];
+  if (!previousScene) return renderFrameBase(time);
+  const fps = Math.max(12, Math.min(60, Number(SPEC.fps) || 30));
+  const previousTime = Math.max(previousScene.in, previousScene.out - 1 / fps);
+  const progress = clamp(local / duration);
+  const type = String(transition.type || 'fade');
+  let previousBuffer = window.__AIVA_TRANSITION_PREV__;
+  let currentBuffer = window.__AIVA_TRANSITION_CURRENT__;
+  if (!previousBuffer) previousBuffer = window.__AIVA_TRANSITION_PREV__ = document.createElement('canvas');
+  if (!currentBuffer) currentBuffer = window.__AIVA_TRANSITION_CURRENT__ = document.createElement('canvas');
+  [previousBuffer,currentBuffer].forEach(buffer => {
+    if (buffer.width !== W || buffer.height !== H) {
+      buffer.width = W;
+      buffer.height = H;
+    }
+  });
+  const previousContext = previousBuffer.getContext('2d');
+  const currentContext = currentBuffer.getContext('2d');
+
+  window.__AIVA_TRANSITION_COMPOSING__ = true;
+  try {
+    // Capture the previous scene's final visible frame without its own transition overlay.
+    renderFrameBase(previousTime);
+    previousContext.clearRect(0,0,W,H);
+    previousContext.drawImage(stage,0,0,W,H);
+
+    // Render the incoming scene at the requested timestamp.
+    renderFrameBase(time);
+    currentContext.clearRect(0,0,W,H);
+    currentContext.drawImage(stage,0,0,W,H);
+
+    // Composite the actual outgoing and incoming scene images.
+    ctx.save();
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.globalAlpha = 1;
+    ctx.clearRect(0,0,W,H);
+    ctx.drawImage(previousBuffer,0,0,W,H);
+    if (type === 'fade') {
+      ctx.globalAlpha = progress;
+      ctx.drawImage(currentBuffer,0,0,W,H);
+    } else {
+      ctx.beginPath();
+      if (type === 'wipe-left') ctx.rect(0,0,W*progress,H);
+      else if (type === 'wipe-right') ctx.rect(W*(1-progress),0,W*progress,H);
+      else if (type === 'wipe-up') ctx.rect(0,H*(1-progress),W,H*progress);
+      else if (type === 'wipe-down') ctx.rect(0,0,W,H*progress);
+      else ctx.rect(0,0,W,H);
+      ctx.clip();
+      ctx.drawImage(currentBuffer,0,0,W,H);
+    }
+    ctx.restore();
+    T = time;
+    return time;
+  } finally {
+    window.__AIVA_TRANSITION_COMPOSING__ = false;
+  }
+}
+
 window.renderFrame = renderFrame;
 window.buildScenes = buildScenes;
 window.ready = document.fonts.ready.then(() => true);
