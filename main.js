@@ -607,12 +607,12 @@ ipcMain.handle('share:html', async (_event, input) => {
   if(needsLottie){
     const lottiePath=path.join(ROOT,'node_modules','lottie-web','build','player','lottie.js');
     if(!fs.existsSync(lottiePath))throw new Error('Lottie runtime is missing from this installation.');
-    vendorScripts.push((await fsp.readFile(lottiePath,'utf8')).replace(/<\\/script/gi,'<\\\\/script'));
+    vendorScripts.push((await fsp.readFile(lottiePath,'utf8')).replace(/<\/script/gi,'<\\/script'));
   }
   if(needsThree){
     const threePath=path.join(ROOT,'assets','three.bundle.js');
     if(!fs.existsSync(threePath))throw new Error('Three.js renderer bundle is missing. Run the app build before exporting this project.');
-    vendorScripts.push((await fsp.readFile(threePath,'utf8')).replace(/<\\/script/gi,'<\\\\/script'));
+    vendorScripts.push((await fsp.readFile(threePath,'utf8')).replace(/<\/script/gi,'<\\/script'));
   }
   const safeProject=JSON.stringify(project)
     .replace(/</g,'\\u003c')
