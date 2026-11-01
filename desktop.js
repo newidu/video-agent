@@ -1722,6 +1722,8 @@
         '<select id="settingMaterial"><option value="acrylic">Acrylic</option><option value="mica">Mica</option><option value="tabbed">Tabbed</option><option value="auto">Auto</option><option value="none">None</option></select>');
     $id('settingsContent').innerHTML =
       settingCard('Theme','Changes are saved automatically.',rows) +
+      settingCard('Theme sharing','Export a reusable theme JSON or import one shared by another person.',
+        '<div class="setting-actions"><button id="exportTheme">Export theme JSON</button><button id="importTheme">Import theme JSON</button></div>') +
       settingCard('Windows material','Windows 10 and unsupported Windows builds use an opaque surface.',material +
         '<p class="settings-note">For the acrylic backdrop to paint correctly, Windows Energy Saver should be off.</p>');
     $id('settingTheme').value = value.mode || 'light';
@@ -1747,6 +1749,23 @@
     };
     ['settingTheme','settingAccent','settingBg','settingPaper','settingInk','settingPaper2','settingInk2','settingMuted','settingLine','settingLine2','settingRail','settingRailInk','settingFontUi','settingFontMono','settingFont','settingDensity','settingMotion','settingMaterial'].forEach(id =>
       $id(id).addEventListener('change',save));
+    $id('exportTheme').onclick=async()=>{
+      try{
+        const result=await A.theme.exportFile();
+        if(result && result.saved)settingsStatus('Theme exported · '+result.path,true);
+      }catch(error){settingsStatus(error.message,false);}
+    };
+    $id('importTheme').onclick=async()=>{
+      try{
+        const result=await A.theme.importFile();
+        if(result && result.imported){
+          settingsData.appearance=result.appearance;
+          applyAppearance(result.appearance);
+          renderAppearance();
+          settingsStatus('Theme imported · all appearance tokens updated',true);
+        }
+      }catch(error){settingsStatus(error.message,false);}
+    };
   }
 
   function renderProviders() {
