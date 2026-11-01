@@ -718,19 +718,160 @@ ipcMain.handle('ai:cancel', (_event, requestId) => {
   return Boolean(controller);
 });
 
+function getIntegrationsConfig() {
+  const raw = readConfig('integrations', {
+    ffmpeg: true,
+    captions: { enabled: false, base_url: 'https://api.openai.com/v1', model: 'whisper-1', language: 'auto', tested: false },
+    tts: { enabled: false, base_url: 'https://api.openai.com/v1', model: 'tts-1', voice: 'alloy', tested: false },
+    image: false, music: false, webSearch: false, motionLibrary: true
+  });
+  const secrets = readSecrets();
+  const captions = raw.captions && typeof raw.captions === 'object' ? raw.captions : {
+    enabled: Boolean(raw.captions), base_url: 'https://api.openai.com/v1',
+    model: 'whisper-1', language: 'auto', tested: false
+  };
+  const tts = raw.tts && typeof raw.tts === 'object' ? raw.tts : {
+    enabled: Boolean(raw.tts), base_url: 'https://api.openai.com/v1',
+    model: 'tts-1', voice: 'alloy', tested: false
+  };
+  return {
+    ffmpeg: raw.ffmpeg !== false,
+    captions: { ...captions, keyConfigured: Boolean(secrets['integration:captions']), enabled: Boolean(captions.enabled && captions.tested && secrets['integration:captions']) },
+    tts: { ...tts, keyConfigured: Boolean(secrets['integration:tts']), enabled: Boolean(tts.enabled && tts.tested && secrets['integration:tts']) },
+    image: Boolean(raw.image),
+    music: Boolean(raw.music),
+    webSearch: Boolean(raw.webSearch),
+    motionLibrary: raw.motionLibrary !== false
+  };
+}
+
+function normaliseIntegrationUrl(value, label) {
+  let parsed;
+  try { parsed = new URL(String(value || '').trim()); }
+  catch { throw new Error(label + ' API base URL is invalid.'); }
+  if (!['https:', 'http:'].includes(parsed.protocol)) throw new Error(label + ' API URL must use HTTP or HTTPS.');
+  if (parsed.protocol === 'http:' && !['localhost','127.0.0.1','::1'].includes(parsed.hostname)) {
+    throw new Error(label + ' remote API must use HTTPS.');
+  }
+  return parsed.toString().replace(/\/+$/, '');
+}
+
+async function testIntegrationEndpoint(kind, config, apiKey) {
+  const endpoint = normaliseIntegrationUrl(config.base_url, kind === 'tts' ? 'TTS' : 'Captions') + '/models';
+  const response = await fetch(endpoint, {
+    method: 'GET',
+    headers: { Authorization: 'Bearer ' + apiKey, Accept: 'application/json' },
+    signal: AbortSignal.timeout(30000)
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error(kind + ' API test failed · HTTP ' + response.status + ' · ' + body.slice(0, 240));
+  let models = [];
+  try {
+    const parsed = JSON.parse(body);
+    models = Array.isArray(parsed.data) ? parsed.data.map(item => item.id).filter(Boolean) : [];
+  } catch {}
+  return { connected: true, models: models.slice(0, 60) };
+}
+
+function runFfmpeg(binary, args, timeoutMs = 120000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(binary, args, { windowsHide: true });
+    let stdout = '', stderr = '';
+    const timer = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch {}
+      reject(new Error('FFmpeg operation timed out.'));
+    }, timeoutMs);
+    child.stdout?.on('data', chunk => { stdout = (stdout + chunk.toString()).slice(-20000); });
+    child.stderr?.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-30000); });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('close', code => {
+      clearTimeout(timer);
+      if (code === 0) resolve({ stdout, stderr });
+      else reject(new Error('FFmpeg exited with code ' + code + ': ' + stderr.slice(-1600)));
+    });
+  });
+}
+
+function validateMediaFile(filePath) {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('Choose a local source video first.');
+  const extension = path.extname(filePath).toLowerCase();
+  if (!['.mp4','.mov','.mkv','.webm','.m4v','.avi','.mpeg','.mpg'].includes(extension)) {
+    throw new Error('Unsupported source video format.');
+  }
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) throw new Error('The selected source video no longer exists.');
+  const stat = fs.statSync(filePath);
+  if (stat.size > 2 * 1024 * 1024 * 1024) throw new Error('Source video exceeds the 2 GB processing limit.');
+  return filePath;
+}
+
+async function makeTranscription(filePath, language = 'auto') {
+  const integrations = getIntegrationsConfig();
+  const config = integrations.captions;
+  const key = readSecrets()['integration:captions'];
+  if (!config.enabled || !config.tested || !key) throw new Error('Auto captions are not enabled. Configure and test the Captions API in Settings → Integrations.');
+  const ffmpeg = getFfmpegPath();
+  if (!ffmpeg) throw new Error('Bundled FFmpeg is required to extract audio for captions.');
+  const source = validateMediaFile(filePath);
+  const temp = path.join(app.getPath('temp'), 'aiva-transcribe-' + randomUUID());
+  await fsp.mkdir(temp, { recursive: true });
+  const wav = path.join(temp, 'audio.wav');
+  try {
+    await runFfmpeg(ffmpeg, ['-hide_banner','-y','-i',source,'-vn','-ac','1','-ar','16000','-c:a','pcm_s16le',wav], 180000);
+    const bytes = await fsp.readFile(wav);
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type:'audio/wav' }), 'audio.wav');
+    form.append('model', String(config.model || 'whisper-1'));
+    form.append('response_format', 'verbose_json');
+    form.append('timestamp_granularities[]', 'segment');
+    if (language && language !== 'auto') form.append('language', String(language).slice(0, 12));
+    const endpoint = normaliseIntegrationUrl(config.base_url, 'Captions') + '/audio/transcriptions';
+    const response = await fetch(endpoint, {
+      method:'POST',
+      headers:{ Authorization:'Bearer ' + key },
+      body:form,
+      signal:AbortSignal.timeout(300000)
+    });
+    const raw = await response.text();
+    if (!response.ok) throw new Error('Caption API HTTP ' + response.status + ' · ' + raw.slice(0, 600));
+    let result;
+    try { result = JSON.parse(raw); } catch { throw new Error('Caption API did not return timestamped JSON.'); }
+    const segments = Array.isArray(result.segments) ? result.segments
+      : Array.isArray(result.words) ? result.words.map((word,index) => ({ id:index,start:word.start,end:word.end,text:word.word })) : [];
+    if (!segments.length) throw new Error('The transcription API returned no time-coded segments. Use a compatible Whisper API that supports verbose_json timestamps.');
+    return {
+      text:String(result.text || ''),
+      language:String(result.language || language || 'auto'),
+      duration:Number(result.duration) || 0,
+      segments:segments.map((segment,index) => ({
+        id:segment.id == null ? index : segment.id,
+        start:Math.max(0,Number(segment.start)||0),
+        end:Math.max(0,Number(segment.end)||0),
+        text:String(segment.text || '').trim()
+      })).filter(segment => segment.end > segment.start && segment.text).slice(0,1500)
+    };
+  } finally {
+    await fsp.rm(temp,{recursive:true,force:true}).catch(()=>{});
+  }
+}
+
 ipcMain.handle('settings:get', () => ({
-  appearance: readConfig('theme', { mode: 'light', accent: '#111111', fontScale: 100, density: 'comfortable', reduceMotion: false, windowMaterial: 'mica' }),
+  appearance: readConfig('theme', { mode: 'light', accent: '#C65A2E', bg:'#F7F6F3', paper:'#FFFFFF', ink:'#171614', fontScale: 100, density: 'comfortable', reduceMotion: false, windowMaterial: 'mica' }),
   tools: readConfig('tools', { state: { get_project: 'on', replace_spec: 'on', verify_video: 'on', add_text: 'on', set_background: 'on', set_format: 'lazy', remove_element: 'lazy', critique: 'lazy' }, options: {} }),
-  integrations: readConfig('integrations', { ffmpeg: true, captions: false, tts: false, image: false, music: false, webSearch: false }),
+  integrations: getIntegrationsConfig(),
+  brandKit: readConfig('brand', { name:'',primary:'#171614',secondary:'#F7F6F3',accent:'#C65A2E',headingFont:'Inter',bodyFont:'Inter',logoDataUrl:'',logoPosition:'bottom-right',useLogo:true }),
   music: readConfig('music', { bpm: 120, volume: 0.7, fadeIn: 0.5, fadeOut: 0.5, autoSfx: true, musicOffByDefault: true })
 }));
 
 ipcMain.handle('settings:save-appearance', async (_event, value) => {
   const allowed = ['light', 'dark', 'system', 'custom'];
+  const validColor = (v,fallback) => /^#[0-9a-fA-F]{6}$/.test(String(v||'')) ? v : fallback;
   const mode = allowed.includes(value.mode) ? value.mode : 'light';
   const appearance = {
     mode,
-    accent: /^#[0-9a-fA-F]{6}$/.test(value.accent) ? value.accent : '#111111',
+    accent: validColor(value.accent, '#C65A2E'),
+    bg: validColor(value.bg, '#F7F6F3'),
+    paper: validColor(value.paper, '#FFFFFF'),
+    ink: validColor(value.ink, '#171614'),
     fontScale: [100, 110, 125].includes(Number(value.fontScale)) ? Number(value.fontScale) : 100,
     density: value.density === 'compact' ? 'compact' : 'comfortable',
     reduceMotion: Boolean(value.reduceMotion),
@@ -742,6 +883,7 @@ ipcMain.handle('settings:save-appearance', async (_event, value) => {
   settingsWindow?.webContents.send('theme:changed', appearance);
   return appearance;
 });
+
 ipcMain.handle('settings:save-tools', async (_event, value) => {
   const core = ['get_project', 'replace_spec', 'verify_video'];
   const state = { ...(value.state || {}) };
@@ -752,29 +894,214 @@ ipcMain.handle('settings:save-tools', async (_event, value) => {
   await writeConfig('tools', result);
   return result;
 });
+
 ipcMain.handle('settings:save-integrations', async (_event, value) => {
+  const old = getIntegrationsConfig();
+  const raw = readConfig('integrations', {});
+  const secrets = readSecrets();
   const result = {
     ffmpeg: value.ffmpeg !== false,
-    captions: Boolean(value.captions),
-    tts: Boolean(value.tts),
-    image: Boolean(value.image),
-    music: Boolean(value.music),
-    webSearch: Boolean(value.webSearch)
+    captions: {
+      enabled: Boolean(value.captions && value.captions.enabled && old.captions.tested && secrets['integration:captions']),
+      base_url: normaliseIntegrationUrl(value.captions?.base_url || old.captions.base_url || 'https://api.openai.com/v1','Captions'),
+      model: String(value.captions?.model || old.captions.model || 'whisper-1').slice(0,100),
+      language: String(value.captions?.language || old.captions.language || 'auto').slice(0,12),
+      tested:Boolean(old.captions.tested)
+    },
+    tts: {
+      enabled: Boolean(value.tts && value.tts.enabled && old.tts.tested && secrets['integration:tts']),
+      base_url: normaliseIntegrationUrl(value.tts?.base_url || old.tts.base_url || 'https://api.openai.com/v1','TTS'),
+      model: String(value.tts?.model || old.tts.model || 'tts-1').slice(0,100),
+      voice: String(value.tts?.voice || old.tts.voice || 'alloy').slice(0,80),
+      tested:Boolean(old.tts.tested)
+    },
+    image:Boolean(value.image),
+    music:Boolean(value.music),
+    webSearch:Boolean(value.webSearch),
+    motionLibrary:value.motionLibrary !== false
   };
+  if (value.captions && typeof value.captions.apiKey === 'string' && value.captions.apiKey.trim()) {
+    secrets['integration:captions'] = value.captions.apiKey.trim();
+  }
+  if (value.tts && typeof value.tts.apiKey === 'string' && value.tts.apiKey.trim()) {
+    secrets['integration:tts'] = value.tts.apiKey.trim();
+  }
+  await writeSecrets(secrets);
   await writeConfig('integrations', result);
-  return result;
+  return getIntegrationsConfig();
 });
-ipcMain.handle('settings:save-music', async (_event, value) => {
-  const result = {
-    bpm: Math.max(40, Math.min(240, Number(value.bpm) || 120)),
-    volume: Math.max(0, Math.min(1, Number(value.volume) || 0.7)),
-    fadeIn: Math.max(0, Math.min(10, Number(value.fadeIn) || 0)),
-    fadeOut: Math.max(0, Math.min(10, Number(value.fadeOut) || 0)),
-    autoSfx: Boolean(value.autoSfx),
-    musicOffByDefault: Boolean(value.musicOffByDefault)
+
+ipcMain.handle('integrations:test', async (_event, kind, input) => {
+  if (!['captions','tts'].includes(kind)) throw new Error('Unknown integration.');
+  const current = getIntegrationsConfig();
+  const oldSecret = readSecrets();
+  const apiKey = String(input.apiKey || oldSecret['integration:' + kind] || '').trim();
+  if (!apiKey) throw new Error('Enter an API key before testing this integration.');
+  const config = {
+    ...current[kind],
+    ...input,
+    base_url: normaliseIntegrationUrl(input.base_url || current[kind].base_url, kind)
   };
-  await writeConfig('music', result);
-  return result;
+  const test = await testIntegrationEndpoint(kind, config, apiKey);
+  const secrets = readSecrets();
+  secrets['integration:' + kind] = apiKey;
+  await writeSecrets(secrets);
+  const integrations = readConfig('integrations', {});
+  integrations[kind] = {
+    enabled:false,
+    base_url:config.base_url,
+    model:String(config.model || current[kind].model).slice(0,100),
+    voice:String(config.voice || current[kind].voice || 'alloy').slice(0,80),
+    language:String(config.language || 'auto').slice(0,12),
+    tested:true,
+    testedAt:Date.now(),
+    modelCount:test.models.length
+  };
+  await writeConfig('integrations',integrations);
+  return { connected:true,models:test.models,config:getIntegrationsConfig()[kind] };
+});
+
+ipcMain.handle('brand:save', async (_event, input) => {
+  const color = (value,fallback) => /^#[0-9a-fA-F]{6}$/.test(String(value||'')) ? value : fallback;
+  const brand = {
+    name:String(input.name||'').slice(0,80),
+    primary:color(input.primary,'#171614'),
+    secondary:color(input.secondary,'#F7F6F3'),
+    accent:color(input.accent,'#C65A2E'),
+    headingFont:String(input.headingFont||'Inter').slice(0,80),
+    bodyFont:String(input.bodyFont||'Inter').slice(0,80),
+    logoPosition:['top-left','top-right','bottom-left','bottom-right'].includes(input.logoPosition) ? input.logoPosition : 'bottom-right',
+    useLogo:input.useLogo !== false
+  };
+  if (typeof input.logoDataUrl === 'string' && input.logoDataUrl.startsWith('data:image/')) {
+    if (input.logoDataUrl.length > 8 * 1024 * 1024) throw new Error('Brand logo exceeds the 6 MB limit.');
+    const match=input.logoDataUrl.match(/^data:image\/(png|jpeg|jpg|svg\+xml);base64,/i);
+    if(!match)throw new Error('Brand logo must be PNG, JPEG or SVG.');
+    const ext=match[1].toLowerCase().includes('svg')?'svg':match[1].toLowerCase()==='png'?'png':'jpg';
+    const bytes=Buffer.from(input.logoDataUrl.slice(input.logoDataUrl.indexOf(',')+1),'base64');
+    if(!bytes.length)throw new Error('Brand logo file is empty.');
+    const folder=path.join(CONFIG(),'brand');
+    await fsp.mkdir(folder,{recursive:true});
+    const file=path.join(folder,'logo.'+ext);
+    await fsp.writeFile(file,bytes);
+    brand.logoDataUrl='data:image/'+(ext==='jpg'?'jpeg':ext==='svg'?'svg+xml':ext)+';base64,'+bytes.toString('base64');
+    brand.logoPath=file;
+  } else {
+    const previous=readConfig('brand',{});
+    brand.logoDataUrl=previous.logoDataUrl||'';
+    brand.logoPath=previous.logoPath||'';
+  }
+  await writeConfig('brand',brand);
+  return brand;
+});
+
+ipcMain.handle('brand:get', () => readConfig('brand', {
+  name:'',primary:'#171614',secondary:'#F7F6F3',accent:'#C65A2E',
+  headingFont:'Inter',bodyFont:'Inter',logoDataUrl:'',logoPosition:'bottom-right',useLogo:true
+}));
+
+ipcMain.handle('media:detect-silence', async (_event, input) => {
+  const ffmpeg=getFfmpegPath();
+  if(!ffmpeg)throw new Error('Bundled FFmpeg is required for silence detection.');
+  const file=validateMediaFile(input.filePath);
+  const threshold=Math.max(-60,Math.min(-15,Number(input.thresholdDb)||-35));
+  const minimum=Math.max(0.15,Math.min(3,Number(input.minimumSeconds)||0.35));
+  const duration=Math.max(0,Number(input.duration)||0);
+  const result=await runFfmpeg(ffmpeg,['-hide_banner','-i',file,'-af','silencedetect=noise='+threshold+'dB:d='+minimum,'-f','null','-'],180000);
+  const text=result.stderr;
+  const starts=[...text.matchAll(/silence_start:\s*([\d.]+)/g)].map(m=>Number(m[1]));
+  const ends=[...text.matchAll(/silence_end:\s*([\d.]+)/g)].map(m=>Number(m[1]));
+  const total=duration||Number((text.match(/Duration:\s*(\d+):(\d+):([\d.]+)/)||[]).slice(1).reduce((a,v,i)=>a+Number(v)*[3600,60,1][i],0))||0;
+  const silences=[];
+  starts.forEach((start,index)=>{
+    const end=ends[index]===undefined?total:ends[index];
+    if(end>start)silences.push({start,end});
+  });
+  const keep=[];
+  let cursor=0;
+  const pad=Math.max(0,Math.min(0.3,Number(input.paddingSeconds)||0.08));
+  for(const silence of silences){
+    const a=Math.max(cursor,Math.min(total,silence.start+pad));
+    const b=Math.max(a,Math.min(total,silence.end-pad));
+    if(a-cursor>0.12)keep.push({start:cursor,end:a});
+    cursor=Math.max(cursor,b);
+  }
+  if(total-cursor>0.12)keep.push({start:cursor,end:total});
+  return {duration:total,thresholdDb:threshold,minimumSeconds:minimum,silences,keepRanges:keep,removedSeconds:+silences.reduce((sum,item)=>sum+Math.max(0,item.end-item.start),0).toFixed(2)};
+});
+
+ipcMain.handle('media:transcribe', async (_event, input) => {
+  return makeTranscription(input.filePath,input.language||'auto');
+});
+
+ipcMain.handle('tts:generate', async (_event, input) => {
+  const integrations=getIntegrationsConfig();
+  const config=integrations.tts;
+  const key=readSecrets()['integration:tts'];
+  if(!config.enabled||!config.tested||!key)throw new Error('Text-to-speech is not enabled. Configure and test it in Settings → Integrations.');
+  const text=String(input.text||'').trim();
+  if(!text||text.length>8000)throw new Error('Voiceover text must contain 1–8000 characters.');
+  const endpoint=normaliseIntegrationUrl(config.base_url,'TTS')+'/audio/speech';
+  const response=await fetch(endpoint,{
+    method:'POST',
+    headers:{Authorization:'Bearer '+key,'Content-Type':'application/json'},
+    body:JSON.stringify({model:config.model||'tts-1',voice:config.voice||'alloy',input:text,response_format:'mp3'}),
+    signal:AbortSignal.timeout(180000)
+  });
+  if(!response.ok)throw new Error('TTS API HTTP '+response.status+' · '+(await response.text()).slice(0,500));
+  const bytes=Buffer.from(await response.arrayBuffer());
+  if(!bytes.length||bytes.length>40*1024*1024)throw new Error('Voiceover result is empty or too large.');
+  let savedPath=null;
+  if(input.projectId){
+    const directory=projectDirectory(input.projectId);
+    await fsp.mkdir(directory,{recursive:true});
+    savedPath=path.join(directory,'voiceover-'+Date.now()+'.mp3');
+    await fsp.writeFile(savedPath,bytes);
+  }
+  return {file:savedPath,bytes:bytes.length,mime:'audio/mpeg',dataUrl:'data:audio/mpeg;base64,'+bytes.toString('base64')};
+});
+
+ipcMain.handle('projects:versions:create', async (_event,id,label,payload) => {
+  const projectId=safeProjectId(id);
+  const directory=projectDirectory(projectId);
+  await fsp.mkdir(path.join(directory,'versions'),{recursive:true});
+  const project=validateProject(payload);
+  const versionId='ver_'+Date.now()+'_'+randomUUID().slice(0,8);
+  const versionFile=path.join(directory,'versions',versionId+'.json');
+  await writeJsonAtomic(versionFile,project);
+  const historyFile=path.join(directory,'versions','index.json');
+  const history=readJson(historyFile,[]);
+  history.unshift({id:versionId,label:String(label||'Version').slice(0,100),createdAt:Date.now()});
+  await writeJsonAtomic(historyFile,history.slice(0,100));
+  return {id:versionId,label:String(label||'Version'),createdAt:Date.now()};
+});
+ipcMain.handle('projects:versions:list', async (_event,id) => {
+  const directory=projectDirectory(id);
+  return readJson(path.join(directory,'versions','index.json'),[]);
+});
+ipcMain.handle('projects:versions:restore', async (_event,id,versionId) => {
+  const directory=projectDirectory(id);
+  if(!/^ver_[\w-]+$/.test(String(versionId)))throw new Error('Invalid version id.');
+  const snapshot=readJson(path.join(directory,'versions',versionId+'.json'),null);
+  if(!snapshot)throw new Error('Project version not found.');
+  return snapshot;
+});
+
+ipcMain.handle('projects:get-workspace-info', () => {
+  const saved = readConfig('workspace', { root: null });
+  return { root: workspaceRoot(), configured: !!(saved && saved.root) };
+});
+ipcMain.handle('projects:choose-root', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose where AI Video Agent projects are saved',
+    defaultPath: workspaceRoot(),
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+  const root = result.filePaths[0];
+  await fsp.mkdir(root, { recursive: true });
+  await writeConfig('workspace', { root, updatedAt: Date.now() });
+  return { canceled: false, root };
 });
 
 ipcMain.handle('export:image', async (_event, dataUrl, defaultName) => {
