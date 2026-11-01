@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     duplicate: id => invoke('projects:duplicate', id),
     reveal: id => invoke('projects:reveal', id),
     getRoot: () => invoke('projects:get-root'),
+    getWorkspaceInfo: () => invoke('projects:get-workspace-info'),
     chooseRoot: () => invoke('projects:choose-root'),
     importFile: () => invoke('projects:import'),
     exportBundle: project => invoke('share:bundle', project),
