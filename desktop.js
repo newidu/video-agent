@@ -911,12 +911,18 @@
       root.dataset.theme = value.mode === 'dark' || systemDark ? 'dark' : 'light';
     };
     applyThemeMode();
-    if(value.mode==='system' && !window.__AIVA_SYSTEM_THEME_LISTENER__ && window.matchMedia){
+    if(window.matchMedia){
       const media=window.matchMedia('(prefers-color-scheme: dark)');
-      const listener=()=>applyThemeMode();
-      if(media.addEventListener)media.addEventListener('change',listener);
-      else if(media.addListener)media.addListener(listener);
-      window.__AIVA_SYSTEM_THEME_LISTENER__=listener;
+      if(value.mode==='system' && !window.__AIVA_SYSTEM_THEME_LISTENER__){
+        const listener=()=>applyThemeMode();
+        if(media.addEventListener)media.addEventListener('change',listener);
+        else if(media.addListener)media.addListener(listener);
+        window.__AIVA_SYSTEM_THEME_LISTENER__=listener;
+      }else if(value.mode!=='system' && window.__AIVA_SYSTEM_THEME_LISTENER__){
+        if(media.removeEventListener)media.removeEventListener('change',window.__AIVA_SYSTEM_THEME_LISTENER__);
+        else if(media.removeListener)media.removeListener(window.__AIVA_SYSTEM_THEME_LISTENER__);
+        window.__AIVA_SYSTEM_THEME_LISTENER__=null;
+      }
     }
     root.dataset.motion = value.reduceMotion ? 'reduced' : 'normal';
     root.dataset.density = value.density === 'compact' ? 'compact' : 'comfortable';
