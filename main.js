@@ -1127,6 +1127,7 @@ ipcMain.handle('brand:save', async (_event, input) => {
     brand.logoPath=previous.logoPath||'';
   }
   await writeConfig('brand',brand);
+  mainWindow?.webContents.send('brand:changed',brand);
   return brand;
 });
 
