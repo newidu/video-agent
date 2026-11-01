@@ -690,17 +690,31 @@ function cropImg(id, url) {
 }
 const MEDIA = { video: null, url: '', ready: false, el: null, scene: null, node: null };
 window.MEDIA = MEDIA;
+function sourceTimeForMedia(media, localTime) {
+  const ranges = media && Array.isArray(media.keepRanges) ? media.keepRanges : null;
+  if (!ranges || !ranges.length) return Math.max(0,localTime);
+  let remaining = Math.max(0,localTime);
+  for (const range of ranges) {
+    const length = Math.max(0,Number(range.end)-Number(range.start));
+    if (remaining <= length) return Math.max(0,Number(range.start)||0) + remaining;
+    remaining -= length;
+  }
+  return Math.max(0,Number(ranges[ranges.length-1].end)||0) - 0.001;
+}
 function drawMediaLayer(sc, lt, t) {
   const mv = (sc.spec ? sc.spec.media : sc.media);
   if (!mv || !MEDIA.video || !MEDIA.ready) return;
   const v = MEDIA.video;
   const live = (typeof playing !== 'undefined' && playing) || window.EXPORT_MODE;
+  const sourceTime = sourceTimeForMedia(mv,lt);
   if (MEDIA.scene !== sc.id) {
     MEDIA.scene = sc.id;
-    try { v.currentTime = Math.max(0, lt); } catch (e) {}
+    try { v.currentTime = sourceTime; } catch (e) {}
     if (live) { const p = v.play(); if (p && p.catch) p.catch(() => {}); }
-  } else if (!live && Math.abs((v.currentTime || 0) - lt) > 0.2) {
-    try { v.currentTime = Math.max(0, lt); } catch (e) {}
+  } else if (!live && Math.abs((v.currentTime || 0) - sourceTime) > 0.2) {
+    try { v.currentTime = sourceTime; } catch (e) {}
+  } else if (live && Array.isArray(mv.keepRanges) && Math.abs((v.currentTime || 0) - sourceTime) > 0.28) {
+    try { v.currentTime = sourceTime; } catch (e) {}
   }
   const vw = v.videoWidth || W, vh = v.videoHeight || H;
   let dw = W, dh = H, dx = 0, dy = 0;
@@ -709,7 +723,9 @@ function drawMediaLayer(sc, lt, t) {
     dx = (W - dw) / 2; dy = (H - dh) / 2;
   } else {
     const k = Math.max(W / vw, H / vh); dw = vw * k; dh = vh * k;
-    dx = (W - dw) / 2; dy = (H - dh) / 2;
+    const fx = clamp(Number(mv.focusX == null ? 0.5 : mv.focusX),0,1);
+    const fy = clamp(Number(mv.focusY == null ? 0.5 : mv.focusY),0,1);
+    dx = W / 2 - fx * dw; dy = H / 2 - fy * dh;
   }
   ctx.save();
   if (mv.dim) { ctx.globalAlpha = 1; }
@@ -830,6 +846,8 @@ const CONSOLE_ONCE = (() => {
 })();
 
 function drawEl(sc, el, i, lt) {
+  if (el.start !== undefined && lt < Number(el.start)) return;
+  if (el.end !== undefined && lt >= Number(el.end)) return;
   const id = (el.id || (sc.id + '.e' + i));
   const liveEdit = (typeof EDIT !== 'undefined' && EDIT.items) ? EDIT.items[id] : null;
   const shownText = liveEdit && liveEdit.text !== undefined && liveEdit.text !== null ? liveEdit.text : el.text;
