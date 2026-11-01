@@ -133,7 +133,7 @@
         if (typeof originalSync === 'function') originalSync();
         const button = $id('btnPlay');
         if (!button) return;
-        const isPlaying = !!window.playing;
+        const isPlaying = /Pause/i.test(button.textContent || '');
         button.innerHTML = isPlaying
           ? '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>'
           : '<svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>';
@@ -952,7 +952,7 @@
     const bar = document.querySelector('.transport');
     if (!bar || $id('btnMute')) return;
     const mute = document.createElement('button');
-    mute.id = 'btnMute'; mute.className = 'tiny'; mute.title = 'Mute / unmute'; mute.textContent = 'Volume';
+    mute.id = 'btnMute'; mute.className = 'tiny iconBtn'; mute.title = 'Mute / unmute'; mute.setAttribute('aria-label','Mute / unmute'); mute.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6l-5 4z"/><path d="M17 9a5 5 0 0 1 0 6"/></svg>';
     const volume = document.createElement('input');
     volume.id = 'masterVolume'; volume.type = 'range'; volume.min = '0'; volume.max = '1'; volume.step = '.01'; volume.value = '1';
     volume.title = 'Master volume'; volume.style.width = '74px';
@@ -964,7 +964,8 @@
       speed.appendChild(option);
     });
     const present = document.createElement('button');
-    present.id = 'btnPresent'; present.className = 'tiny'; present.title = 'Fullscreen presentation'; present.textContent = '⛶';
+    present.id = 'btnPresent'; present.className = 'tiny iconBtn'; present.title = 'Fullscreen presentation'; present.setAttribute('aria-label','Fullscreen presentation');
+    present.innerHTML = '<svg viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg>';
     bar.appendChild(mute); bar.appendChild(volume); bar.appendChild(speed); bar.appendChild(present);
     mute.onclick = () => {
       muted = !muted;
@@ -972,7 +973,9 @@
       if (audioEl) audioEl.volume = muted ? 0 : v;
       if (MEDIA && MEDIA.video) MEDIA.video.volume = muted ? 0 : v;
       if (typeof sfxBus !== 'undefined' && sfxBus && sfxBus.gain) sfxBus.gain.value = muted ? 0 : v;
-      mute.textContent = muted ? 'Unmute' : 'Volume';
+      mute.innerHTML = muted
+        ? '<svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6l-5 4z"/><path d="m17 9 5 6m0-6-5 6"/></svg>'
+        : '<svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6l-5 4z"/><path d="M17 9a5 5 0 0 1 0 6"/></svg>';
     };
     volume.oninput = () => {
       const v = Number(volume.value) * (muted ? 0 : 1);
