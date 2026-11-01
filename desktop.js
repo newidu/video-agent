@@ -23,6 +23,19 @@
   let loadingProject = false;
   let ffmpegAvailable = false;
   let muted = false;
+  let projectComments = [];
+  let projectTemplate = 'blank';
+  let commentMode = false;
+  let brandImage = null;
+  let brandImageSource = '';
+  const MOTION_PRESETS = [
+    {id:'kinetic-title',name:'Kinetic title',description:'Staggered typography with a clean settle.'},
+    {id:'orbital-rings',name:'Orbital rings',description:'Layered circular motion with depth.'},
+    {id:'particle-field',name:'Particle field',description:'Procedural particle drift and connection lines.'},
+    {id:'waveform',name:'Waveform',description:'Animated frequency-like lines.'},
+    {id:'product-spotlight',name:'Product spotlight',description:'Radial highlight and rotating orbit.'},
+    {id:'data-bars',name:'Data bars',description:'Animated bar chart and numeric callout.'}
+  ];
 
   const $id = id => document.getElementById(id);
   const escapeHtml = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
@@ -513,6 +526,10 @@
         music: MUSIC,
         sfx: SFX,
         chat: CHAT.slice(-300),
+        comments: projectComments.slice(-500),
+        brandKit: window.AIVA_BRAND_KIT || settingsData?.brandKit || null,
+        template: projectTemplate,
+        sourceMediaName: window.AIVA_SOURCE_NAME || null,
         showBeats: !!SPEC.showBeats,
         playbackSpeed: Number($id('playbackSpeed') && $id('playbackSpeed').value || 1)
       };
@@ -606,6 +623,15 @@
       EDIT.scenes = (data.edit && data.edit.scenes) || data.scenes || {};
       EDIT.base = (data.edit && data.edit.base) || data.base || {};
       if (data.music) Object.assign(MUSIC, data.music);
+      projectComments = Array.isArray(data.comments) ? data.comments.slice(-500) : [];
+      projectTemplate = data.template || 'blank';
+      if (data.brandKit) {
+        window.AIVA_BRAND_KIT = data.brandKit;
+        applyAivaBrandKit(data.brandKit);
+      } else if (settingsData && settingsData.brandKit) {
+        window.AIVA_BRAND_KIT = settingsData.brandKit;
+        applyAivaBrandKit(settingsData.brandKit);
+      }
       if (data.sfx) {
         SFX.length = 0;
         data.sfx.forEach(item => SFX.push(Object.assign({}, item)));
@@ -680,6 +706,10 @@
       EDIT.base = {};
       SELECTED = null;
       CHAT.length = 0;
+      projectComments = [];
+      projectTemplate = options.template || 'blank';
+      window.AIVA_SOURCE_PATH = null;
+      window.AIVA_SOURCE_NAME = null;
       if (typeof TODOS !== 'undefined') TODOS = [];
       Object.keys(CROP_IMGS).forEach(key => delete CROP_IMGS[key]);
       setMusic({ clear: true });
@@ -696,7 +726,10 @@
       if ($id('homeScreen')) $id('homeScreen').classList.remove('open');
       updateProjectTitle();
       renderProjectSidebar();
-      sysNote('Blank project ready. Describe the video you want to create.');
+      renderCommentMarkers();
+      sysNote(projectTemplate === 'blank'
+        ? 'Blank project ready. Describe the video you want to create.'
+        : 'New ' + projectTemplate + ' project ready. Describe the content; the agent will use this starter structure and keep every scene editable.');
       status('New project · ' + projectName);
       await persistNow();
       return created;
@@ -714,6 +747,7 @@
       projectId = data.id;
       projectName = data.name || data.spec.title || 'Untitled project';
       renderStoredChat();
+      renderCommentMarkers();
       updateProjectTitle();
       if ($id('homeScreen')) $id('homeScreen').classList.remove('open');
       renderProjectSidebar();
@@ -1598,7 +1632,10 @@
     installProjectGallery();
     installSelectionContext();
     installComposerUI();
+    installProjectHistoryUI();
+    installCommentLayer();
     installSecureAgent();
+    installMediaAgentTools();
     installToolPolicy();
     installPlayerControls();
     installPosterExport();
@@ -1609,7 +1646,10 @@
       const pair = await Promise.all([A.app.info(),A.settings.get(),A.ui.get()]);
       ffmpegAvailable = !!pair[0].ffmpegAvailable;
       toolStates = pair[1].tools && pair[1].tools.state || {};
+      settingsData = pair[1];
       applyAppearance(pair[1].appearance);
+      window.AIVA_BRAND_KIT = pair[1].brandKit || {};
+      applyAivaBrandKit(window.AIVA_BRAND_KIT);
       document.body.classList.toggle('sidebar-hidden',!!pair[2].sidebarHidden);
       document.body.classList.toggle('agent-hidden',!!pair[2].agentHidden);
       await loadProviderConfig();
