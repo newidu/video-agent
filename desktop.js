@@ -693,6 +693,7 @@
       window.toolSchema=function(){
         const schema=previousSchema.apply(this,arguments);
         const extras={
+          get_brand_kit:{type:'object',properties:{},required:[]},
           generate_captions:{type:'object',properties:{language:{type:'string'}},required:[]},
           remove_silence:{type:'object',properties:{thresholdDb:{type:'number'},minimumSeconds:{type:'number'},paddingSeconds:{type:'number'}},required:[]},
           smart_reframe:{type:'object',properties:{format:{type:'string',enum:['9:16','16:9','1:1']},focusX:{type:'number'},focusY:{type:'number'}},required:['format']},
