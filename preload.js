@@ -96,6 +96,16 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     ipcRenderer.on('theme:changed', listener);
     return () => ipcRenderer.removeListener('theme:changed', listener);
   },
+  onSettingsChanged: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('settings:changed', listener);
+    return () => ipcRenderer.removeListener('settings:changed', listener);
+  },
+  onBrandChanged: callback => {
+    const listener = (_event, value) => callback(value);
+    ipcRenderer.on('brand:changed', listener);
+    return () => ipcRenderer.removeListener('brand:changed', listener);
+  },
   onBrandChanged: callback => {
     const listener = (_event, value) => callback(value);
     ipcRenderer.on('brand:changed', listener);
