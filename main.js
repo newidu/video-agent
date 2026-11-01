@@ -116,8 +116,16 @@ function makeWindowOptions(kind) {
     }
   };
   if (isWin11) {
-    base.backgroundMaterial = settings ? 'acrylic' : 'mica';
-    base.transparent = true;
+    const preferred=readConfig('theme',{windowMaterial:'mica'}).windowMaterial || 'mica';
+    const material=settings ? 'acrylic' : preferred;
+    if(material==='none'){
+      base.backgroundColor='#F7F6F3';
+      base.transparent=false;
+    }else{
+      base.backgroundMaterial=material;
+      base.transparent=true;
+      base.backgroundColor='#00000000';
+    }
   } else if (process.platform === 'darwin') {
     base.vibrancy = 'under-window';
     base.visualEffectState = 'active';
@@ -129,11 +137,26 @@ function loadAppWindow(win, view) {
   win.loadFile(path.join(ROOT, 'index.html'), { query: view ? { view } : {} });
 }
 
-function createMainWindow() {
-  mainWindow = new BrowserWindow(makeWindowOptions('main'));
+function createMainWindow(bounds) {
+  mainWindow = new BrowserWindow({ ...makeWindowOptions('main'), ...(bounds || {}) });
   loadAppWindow(mainWindow, 'studio');
   mainWindow.once('ready-to-show', () => mainWindow && mainWindow.show());
   mainWindow.on('closed', () => { mainWindow = null; });
+}
+
+function recreateMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const old=mainWindow;
+  const bounds=old.getBounds();
+  const visible=old.isVisible();
+  old.removeAllListeners('closed');
+  mainWindow=null;
+  old.destroy();
+  mainWindow=new BrowserWindow({ ...makeWindowOptions('main'), ...bounds, show:false });
+  loadAppWindow(mainWindow,'studio');
+  mainWindow.once('ready-to-show',()=>{if(mainWindow && visible)mainWindow.show();});
+  mainWindow.on('closed',()=>{mainWindow=null;});
+  buildMenu();
 }
 
 function openSettingsWindow() {
@@ -867,6 +890,7 @@ ipcMain.handle('settings:get', () => ({
 }));
 
 ipcMain.handle('settings:save-appearance', async (_event, value) => {
+  const previousTheme=readConfig('theme',{windowMaterial:'mica'});
   const allowed = ['light', 'dark', 'system', 'custom'];
   const validColor = (v,fallback) => /^#[0-9a-fA-F]{6}$/.test(String(v||'')) ? v : fallback;
   const mode = allowed.includes(value.mode) ? value.mode : 'light';
@@ -885,6 +909,7 @@ ipcMain.handle('settings:save-appearance', async (_event, value) => {
   nativeTheme.themeSource = mode === 'system' ? 'system' : mode === 'dark' ? 'dark' : 'light';
   mainWindow?.webContents.send('theme:changed', appearance);
   settingsWindow?.webContents.send('theme:changed', appearance);
+  if(previousTheme.windowMaterial!==appearance.windowMaterial)recreateMainWindow();
   return appearance;
 });
 
@@ -1228,11 +1253,16 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
   if (job.audioPath) {
     args.push('-map', '1:a:0', '-filter:a', 'volume=' + job.audioVolume.toFixed(3), '-c:a', 'aac', '-b:a', '192k');
   }
-  args.push(
-    '-frames:v', String(job.count), '-c:v', 'libx264',
-    '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
-    '-movflags', '+faststart', partial
-  );
+  let encoder='libx264';
+  let encoderArgs=['-preset','medium','-crf','18'];
+  try{
+    const detected=await runFfmpeg(binary,['-hide_banner','-encoders'],30000);
+    const available=detected.stdout+'\\n'+detected.stderr;
+    if(/h264_nvenc/.test(available)){encoder='h264_nvenc';encoderArgs=['-preset','p4','-cq','19'];}
+    else if(/h264_qsv/.test(available)){encoder='h264_qsv';encoderArgs=['-preset','medium','-global_quality','20'];}
+    else if(/h264_amf/.test(available)){encoder='h264_amf';encoderArgs=['-quality','balanced','-qp_i','20','-qp_p','20'];}
+  }catch(error){console.warn('Encoder detection failed; using libx264.',error);}
+  args.push('-frames:v',String(job.count),'-c:v',encoder,...encoderArgs,'-pix_fmt','yuv420p','-movflags','+faststart',partial);
   const binary = getFfmpegPath();
   try {
     await new Promise((resolve, reject) => {
@@ -1258,9 +1288,13 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
     await fsp.rename(partial, output);
     const stat = await fsp.stat(output);
     mainWindow?.webContents.send('export:progress', { phase: 'done', value: 1 });
-    return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg', audio: Boolean(job.audioPath) };
+    return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg', encoder, audio: Boolean(job.audioPath) };
   } catch (error) {
-    await fsp.rm(partial, { force: true });
+    const partialStat=await fsp.stat(partial).catch(()=>null);
+    if(partialStat && partialStat.size>0) {
+      error.message += ' · An incomplete recovery file was kept at: ' + partial;
+      error.partialPath=partial;
+    }
     throw error;
   } finally {
     await fsp.rm(job.directory, { recursive: true, force: true });
