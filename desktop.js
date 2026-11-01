@@ -315,10 +315,15 @@
   }
 
   async function saveProject() {
-    if (!projectId) {
-      await createNewProject((SPEC && SPEC.title) || 'Untitled project');
-    } else {
+    try {
+      if (!projectId) {
+        const created = await A.project.create((SPEC && SPEC.title) || 'Untitled project');
+        projectId = created.id;
+        projectName = created.name;
+      }
       await persistNow();
+    } catch (error) {
+      status('Save failed · ' + error.message);
     }
   }
 
