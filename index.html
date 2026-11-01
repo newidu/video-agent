@@ -4571,6 +4571,13 @@ function ensureMediaAudio() {
 $('fileVideo').onchange = e => {
   const f = e.target.files && e.target.files[0];
   if (!f) return;
+  window.AIVA_SOURCE_NAME = f.name;
+  window.AIVA_SOURCE_PATH = null;
+  try {
+    if (window.aiva && window.aiva.media && typeof window.aiva.media.getPathForFile === 'function') {
+      window.AIVA_SOURCE_PATH = window.aiva.media.getPathForFile(f) || null;
+    }
+  } catch (error) { console.warn('Could not resolve the selected media path for FFmpeg tools.', error); }
   const url = URL.createObjectURL(f);
   const v = document.createElement('video');
   v.src = url; v.playsInline = true; v.preload = 'auto'; v.muted = false;
