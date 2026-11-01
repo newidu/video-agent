@@ -16,7 +16,10 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     load: id => invoke('projects:load', id),
     save: project => invoke('projects:save', project),
     rename: (id, name) => invoke('projects:rename', id, name),
-    delete: id => invoke('projects:delete', id)
+    delete: id => invoke('projects:delete', id),
+    importFile: () => invoke('projects:import'),
+    exportBundle: project => invoke('share:bundle', project),
+    exportHtml: project => invoke('share:html', project)
   },
   providers: {
     list: () => invoke('providers:list'),
