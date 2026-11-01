@@ -482,7 +482,16 @@
     root.dataset.theme = value.mode === 'dark' ? 'dark' : 'light';
     root.dataset.motion = value.reduceMotion ? 'reduced' : 'normal';
     root.dataset.density = value.density === 'compact' ? 'compact' : 'comfortable';
-    root.style.setProperty('--accent', value.accent || '#111111');
+    root.style.setProperty('--accent', value.accent || '#C65A2E');
+    if (value.mode === 'custom') {
+      root.style.setProperty('--bg',value.bg || '#F7F6F3');
+      root.style.setProperty('--paper',value.paper || '#FFFFFF');
+      root.style.setProperty('--ink',value.ink || '#171614');
+    } else {
+      root.style.removeProperty('--bg');
+      root.style.removeProperty('--paper');
+      root.style.removeProperty('--ink');
+    }
     root.style.fontSize = ({100:'14px',110:'15.4px',125:'17.5px'})[value.fontScale] || '14px';
   }
 
@@ -1124,7 +1133,9 @@
       '<button class="settings-nav" data-settings-tab="providers">Providers</button>' +
       '<button class="settings-nav" data-settings-tab="tools">Tools</button>' +
       '<button class="settings-nav" data-settings-tab="integrations">Integrations</button>' +
+      '<button class="settings-nav" data-settings-tab="brand">Brand Kit</button>' +
       '<button class="settings-nav" data-settings-tab="music">Music &amp; SFX</button>' +
+      '<button class="settings-nav" data-settings-tab="motion">Motion Library</button>' +
       '<button class="settings-nav" data-settings-tab="advanced">Advanced</button>' +
       '<button class="settings-nav" data-settings-tab="about">About</button></nav>' +
       '<section class="settings-main"><header class="settings-top"><h1 id="settingsTitle">Appearance</h1><span id="settingsStatus" class="settings-status"></span></header>' +
@@ -1146,7 +1157,7 @@
       button.classList.toggle('active', button.dataset.settingsTab === tab));
     const labels = {
       appearance:'Appearance',providers:'AI Providers',tools:'Agent Tools',
-      integrations:'Integrations',music:'Music & SFX',advanced:'Advanced',about:'About'
+      integrations:'Integrations',brand:'Brand Kit',music:'Music & SFX',motion:'Motion Library',advanced:'Advanced',about:'About'
     };
     $id('settingsTitle').textContent = labels[tab] || 'Settings';
     settingsStatus('');
@@ -1154,7 +1165,9 @@
     else if (tab === 'providers') renderProviders();
     else if (tab === 'tools') renderTools();
     else if (tab === 'integrations') renderIntegrations();
+    else if (tab === 'brand') renderBrandKit();
     else if (tab === 'music') renderMusicSettings();
+    else if (tab === 'motion') renderMotionLibrary();
     else if (tab === 'advanced') renderAdvanced();
     else renderAbout();
   }
@@ -1165,7 +1178,14 @@
       settingRow('Theme','Light, dark or follow the Windows setting.',
         '<select id="settingTheme"><option value="light">Light</option><option value="dark">Dark</option><option value="system">System</option><option value="custom">Custom</option></select>') +
       settingRow('Accent colour','Selection and focus colour.',
-        '<input id="settingAccent" type="color" value="' + escapeHtml(value.accent || '#111111') + '">') +
+        '<input id="settingAccent" type="color" value="' + escapeHtml(value.accent || '#C65A2E') + '">') +
+      settingRow('Window background','Custom workspace backdrop colour.',
+        '<input id="settingBg" type="color" value="' + escapeHtml(value.bg || '#F7F6F3') + '">') +
+      settingRow('Panel surface','Chat and card background.',
+        '<input id="settingPaper" type="color" value="' + escapeHtml(value.paper || '#FFFFFF') + '">') +
+      settingRow('Main text','Primary interface text colour.',
+        '<input id="settingInk" type="color" value="' + escapeHtml(value.ink || '#171614') + '">') +
+
       settingRow('Font size','Scale the editor interface.',
         '<select id="settingFont"><option value="100">100%</option><option value="110">110%</option><option value="125">125%</option></select>') +
       settingRow('Density','Choose control spacing.',
@@ -1187,6 +1207,7 @@
     const save = async () => {
       const next = {
         mode:$id('settingTheme').value,accent:$id('settingAccent').value,
+        bg:$id('settingBg').value,paper:$id('settingPaper').value,ink:$id('settingInk').value,
         fontScale:Number($id('settingFont').value),density:$id('settingDensity').value,
         reduceMotion:$id('settingMotion').checked,windowMaterial:$id('settingMaterial').value
       };
@@ -1196,7 +1217,7 @@
         settingsStatus('Saved',true);
       } catch (error) { settingsStatus(error.message,false); }
     };
-    ['settingTheme','settingAccent','settingFont','settingDensity','settingMotion','settingMaterial'].forEach(id =>
+    ['settingTheme','settingAccent','settingBg','settingPaper','settingInk','settingFont','settingDensity','settingMotion','settingMaterial'].forEach(id =>
       $id(id).addEventListener('change',save));
   }
 
@@ -1330,32 +1351,174 @@
 
   function renderIntegrations() {
     const info = settingsData.integrations || {};
-    const items = [
-      ['ffmpeg','FFmpeg export','Native MP4 export using the bundled binary.'],
-      ['captions','Auto captions','Whisper-compatible speech transcription.'],
-      ['tts','Text-to-speech','Create narration and voiceovers.'],
-      ['image','Image generation','Generate optional posters and backgrounds.'],
-      ['music','Music generation','Create complete music tracks.'],
-      ['webSearch','Web search','Research before writing a video script.']
-    ];
-    const rows = items.map(item => {
-      const checked = item[0] === 'ffmpeg' ? info.ffmpeg !== false : !!info[item[0]];
-      const disabled = item[0] === 'ffmpeg' && !ffmpegAvailable;
-      return settingRow(item[1],item[2],
-        '<input type="checkbox" data-integration="' + item[0] + '"' + (checked?' checked':'') + (disabled?' disabled':'') + '>');
-    }).join('');
-    $id('settingsContent').innerHTML = settingCard('Optional integrations',
-      'FFmpeg is bundled and can export the canvas. Caption, TTS, image, music and web-search connectors are currently marked as optional integration slots; their provider-specific handlers are not yet wired.',
-      rows + '<div class="setting-actions"><button id="integrationsSave" class="primary">Save integration settings</button></div>');
-    $id('integrationsSave').onclick = async () => {
-      const next = {};
-      document.querySelectorAll('[data-integration]').forEach(x => next[x.dataset.integration] = x.checked);
+    const captions = info.captions || {};
+    const tts = info.tts || {};
+    const cards = [
+      settingCard('Auto captions & speech recognition',
+        'Whisper-compatible API. The key is encrypted on this Windows account. Test the endpoint before enabling the agent tool.',
+        '<div class="integration-grid">' +
+        settingRow('Enable captions','Allow the agent to transcribe video and add timed subtitles.',
+          '<input id="intCaptionsOn" type="checkbox"' + (captions.enabled?' checked':'') + '>') +
+        settingRow('API base URL','Example: https://api.openai.com/v1',
+          '<input id="intCaptionsUrl" class="wide-input" value="' + escapeHtml(captions.base_url || 'https://api.openai.com/v1') + '">') +
+        settingRow('API key',captions.keyConfigured?'Key saved securely · enter a new value to replace it.':'Not configured.',
+          '<input id="intCaptionsKey" class="wide-input" type="password" autocomplete="new-password" placeholder="' + (captions.keyConfigured?'Saved securely':'Paste API key') + '">') +
+        settingRow('Transcription model','Default: whisper-1. Some providers offer gpt-4o-mini-transcribe.',
+          '<input id="intCaptionsModel" class="wide-input" value="' + escapeHtml(captions.model || 'whisper-1') + '">') +
+        settingRow('Language','Use auto or an ISO-639-1 language code.',
+          '<input id="intCaptionsLanguage" class="wide-input" value="' + escapeHtml(captions.language || 'auto') + '">') +
+        '<div class="integration-actions"><button id="testCaptions">Test API connection</button><span id="captionsStatus" class="integration-status">' + (captions.tested ? 'Connected · endpoint tested' : captions.keyConfigured ? 'Key saved · test required' : 'Not connected') + '</span></div></div>') +
+      settingCard('AI voiceover · text to speech',
+        'OpenAI-compatible /audio/speech endpoint. Generated audio is stored with the project and added to its soundtrack.',
+        '<div class="integration-grid">' +
+        settingRow('Enable voiceover','Allow the agent to generate spoken narration.',
+          '<input id="intTtsOn" type="checkbox"' + (tts.enabled?' checked':'') + '>') +
+        settingRow('API base URL','Example: https://api.openai.com/v1',
+          '<input id="intTtsUrl" class="wide-input" value="' + escapeHtml(tts.base_url || 'https://api.openai.com/v1') + '">') +
+        settingRow('API key',tts.keyConfigured?'Key saved securely · enter a new value to replace it.':'Not configured.',
+          '<input id="intTtsKey" class="wide-input" type="password" autocomplete="new-password" placeholder="' + (tts.keyConfigured?'Saved securely':'Paste API key') + '">') +
+        settingRow('Speech model','Default: tts-1 or a compatible speech model.',
+          '<input id="intTtsModel" class="wide-input" value="' + escapeHtml(tts.model || 'tts-1') + '">') +
+        settingRow('Voice','Provider voice ID, for example alloy.',
+          '<input id="intTtsVoice" class="wide-input" value="' + escapeHtml(tts.voice || 'alloy') + '">') +
+        '<div class="integration-actions"><button id="testTts">Test API connection</button><span id="ttsStatus" class="integration-status">' + (tts.tested ? 'Connected · endpoint tested' : tts.keyConfigured ? 'Key saved · test required' : 'Not connected') + '</span></div></div>') +
+      settingCard('Native video export & optional tools',
+        'FFmpeg is bundled with the Windows build. Motion library is local and does not require an API key.',
+        settingRow('FFmpeg H.264 / AAC export','Native frame-exact export. Hardware encoder is detected automatically when supported.',
+          '<input type="checkbox" checked disabled title="Bundled FFmpeg is enabled by default">') +
+        settingRow('Motion code library','Reusable canvas-code presets and agent-authored motion graphics.',
+          '<input id="intMotionLibrary" type="checkbox"' + (info.motionLibrary !== false?' checked':'') + '>') +
+        '<div class="setting-actions"><button id="saveIntegrations" class="primary">Save integration switches</button></div>');
+    $id('settingsContent').innerHTML = cards;
+
+    async function test(kind) {
+      const isCaptions = kind === 'captions';
+      const prefix = isCaptions ? 'intCaptions' : 'intTts';
+      const statusId = isCaptions ? 'captionsStatus' : 'ttsStatus';
+      const button = $id(isCaptions ? 'testCaptions' : 'testTts');
+      button.disabled = true;
+      $id(statusId).textContent = 'Testing API…';
       try {
-        settingsData.integrations = await A.settings.saveIntegrations(next);
-        settingsStatus('Integration preferences saved',true);
+        const result = await A.settings.testIntegration(kind, {
+          base_url:$id(prefix+'Url').value.trim(),
+          apiKey:$id(prefix+'Key').value.trim(),
+          model:$id(prefix+'Model').value.trim(),
+          voice:isCaptions?'':$id('intTtsVoice').value.trim(),
+          language:isCaptions?$id('intCaptionsLanguage').value.trim():'auto'
+        });
+        settingsData.integrations[kind] = result.config;
+        $id(prefix+'Key').value = '';
+        $id(statusId).textContent = 'Connected · ' + (result.models.length ? result.models.length + ' models' : 'API authenticated');
+        $id(statusId).classList.add('ok');
+        settingsStatus((isCaptions?'Captions':'TTS')+' API connection verified',true);
+      } catch (error) {
+        $id(statusId).textContent = error.message || 'Connection failed';
+        $id(statusId).classList.remove('ok');
+        settingsStatus(error.message,false);
+      } finally { button.disabled = false; }
+    }
+    $id('testCaptions').onclick = () => test('captions');
+    $id('testTts').onclick = () => test('tts');
+    $id('saveIntegrations').onclick = async () => {
+      try {
+        settingsData.integrations = await A.settings.saveIntegrations({
+          ffmpeg:true,
+          captions:{
+            enabled:$id('intCaptionsOn').checked,
+            base_url:$id('intCaptionsUrl').value.trim(),
+            model:$id('intCaptionsModel').value.trim(),
+            language:$id('intCaptionsLanguage').value.trim(),
+            apiKey:$id('intCaptionsKey').value.trim()
+          },
+          tts:{
+            enabled:$id('intTtsOn').checked,
+            base_url:$id('intTtsUrl').value.trim(),
+            model:$id('intTtsModel').value.trim(),
+            voice:$id('intTtsVoice').value.trim(),
+            apiKey:$id('intTtsKey').value.trim()
+          },
+          motionLibrary:$id('intMotionLibrary').checked
+        });
+        settingsStatus('Integration switches saved · tools are gated by successful API tests',true);
+        settingsData.tools = await A.settings.get().then(value=>value.tools);
+        toolStates = settingsData.tools.state || {};
       } catch (error) { settingsStatus(error.message,false); }
     };
   }
+
+  function renderBrandKit() {
+    const brand=settingsData.brandKit || {};
+    $id('settingsContent').innerHTML =
+      settingCard('Brand identity','These colours and fonts are added to the agent context for every scene. The logo can be drawn as a persistent overlay.',
+        settingRow('Brand / company name','Shown to the agent as project brand context.','<input id="brandName" class="wide-input" value="' + escapeHtml(brand.name||'') + '" placeholder="Your brand">') +
+        settingRow('Primary colour','Headlines and key UI surfaces.','<input id="brandPrimary" type="color" value="' + escapeHtml(brand.primary||'#171614') + '">') +
+        settingRow('Secondary colour','Background and supporting surfaces.','<input id="brandSecondary" type="color" value="' + escapeHtml(brand.secondary||'#F7F6F3') + '">') +
+        settingRow('Accent colour','Calls to action and emphasis.','<input id="brandAccent" type="color" value="' + escapeHtml(brand.accent||'#C65A2E') + '">') +
+        settingRow('Heading font','Font family name (must be installed or imported).','<input id="brandHeading" class="wide-input" value="' + escapeHtml(brand.headingFont||'Inter') + '">') +
+        settingRow('Body font','Font family name (must be installed or imported).','<input id="brandBody" class="wide-input" value="' + escapeHtml(brand.bodyFont||'Inter') + '">') +
+        settingRow('Logo','Optional transparent PNG, JPEG or SVG file.','<input id="brandLogo" type="file" accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/svg+xml">') +
+        settingRow('Logo position','Choose where the logo appears in the output.','<select id="brandLogoPosition"><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select>') +
+        settingRow('Show logo in all scenes','Persistent branding overlay.','<input id="brandUseLogo" type="checkbox"' + (brand.useLogo!==false?' checked':'') + '>') +
+        '<div class="setting-actions"><button id="brandSave" class="primary">Save Brand Kit</button></div>');
+    $id('brandLogoPosition').value=brand.logoPosition||'bottom-right';
+    $id('brandSave').onclick=async()=>{
+      try{
+        let logoDataUrl='';
+        const file=$id('brandLogo').files && $id('brandLogo').files[0];
+        if(file)logoDataUrl=await new Promise((resolve,reject)=>{
+          const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=()=>reject(reader.error||new Error('Could not read logo file.'));reader.readAsDataURL(file);
+        });
+        settingsData.brandKit=await A.settings.saveBrandKit({
+          name:$id('brandName').value,primary:$id('brandPrimary').value,secondary:$id('brandSecondary').value,
+          accent:$id('brandAccent').value,headingFont:$id('brandHeading').value,bodyFont:$id('brandBody').value,
+          logoDataUrl,logoPosition:$id('brandLogoPosition').value,useLogo:$id('brandUseLogo').checked
+        });
+        window.AIVA_BRAND_KIT=settingsData.brandKit;
+        if(typeof window.applyAivaBrandKit==='function')window.applyAivaBrandKit(settingsData.brandKit);
+        settingsStatus('Brand Kit saved · new agent scenes will follow this identity',true);
+      }catch(error){settingsStatus(error.message,false);}
+    };
+  }
+
+  function renderMotionLibrary() {
+    const presets=[
+      ['Minimal title reveal','Soft fade and upward motion for a clean title.'],
+      ['Kinetic typography','Word-by-word scale, stagger and settle.'],
+      ['Product spotlight','Radial focus, orbiting accents and controlled highlights.'],
+      ['Data / infographic','Animated bars, counters and callout lines.'],
+      ['Logo sting','Short geometric reveal for a supplied brand mark.'],
+      ['Depth / parallax','Layered motion with scale and perspective-like canvas transforms.']
+    ];
+    $id('settingsContent').innerHTML =
+      settingCard('Code-based motion system','The agent builds directly with the existing JavaScript canvas code elements. These are editable starting points, not locked templates.',
+        '<div class="motion-presets">' + presets.map((item,index)=>
+          '<button class="motion-preset" data-motion-preset="'+index+'"><strong>'+escapeHtml(item[0])+'</strong><small>'+escapeHtml(item[1])+'</small></button>'
+        ).join('') + '</div>') +
+      settingCard('Starter templates','Choose a structure, then ask the agent to rewrite every scene.',
+        '<div class="motion-presets"><button class="motion-preset" data-template="youtube-intro"><strong>YouTube intro</strong><small>Hook · channel identity · CTA</small></button>' +
+        '<button class="motion-preset" data-template="instagram-story"><strong>Instagram Story</strong><small>Vertical hook · story · CTA</small></button>' +
+        '<button class="motion-preset" data-template="product-demo"><strong>Product demo</strong><small>Problem · product · proof · action</small></button></div>') +
+      settingCard('Advanced motion support','Canvas code may generate procedural 2D / pseudo-3D motion using JavaScript. Lottie JSON and full WebGL / Three.js scene import are not enabled in this build yet.',
+        '<p class="settings-note">Use code elements for reusable HTML/CSS/JS-inspired motion designs. A Lottie or Three.js import requires a dedicated renderer integration, not just an API key.</p>');
+    document.querySelectorAll('[data-motion-preset]').forEach(button=>{
+      button.onclick=()=>{
+        const item=presets[Number(button.dataset.motionPreset)];
+        if($id('prompt'))$id('prompt').value='Create an editable motion-graphics sequence using the '+item[0]+' direction. '+item[1]+' Use native code elements and keep every part selectable.';
+        if(view==='settings')status('Motion direction copied to the Studio composer.');
+      };
+    });
+    document.querySelectorAll('[data-template]').forEach(button=>{
+      button.onclick=()=>{
+        const template=button.dataset.template;
+        const instruction=template==='youtube-intro'?'Create a short YouTube intro: hook, logo / channel identity, then a concise CTA.':
+          template==='instagram-story'?'Create a vertical Instagram Story: strong first-frame hook, clear story progression and a legible CTA.':
+          'Create a product demo: problem, product reveal, key benefits, proof and final CTA.';
+        if($id('prompt'))$id('prompt').value=instruction+' Make every scene fully editable and follow the active Brand Kit.';
+        settingsStatus('Template brief is ready in the Studio composer.',true);
+      };
+    });
+  }
+
 
   function renderMusicSettings() {
     const music = settingsData.music || {};
