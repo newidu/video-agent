@@ -894,14 +894,18 @@
     root.dataset.density = value.density === 'compact' ? 'compact' : 'comfortable';
     root.style.setProperty('--accent', value.accent || '#C65A2E');
     if (value.mode === 'custom') {
-      root.style.setProperty('--bg',value.bg || '#F7F6F3');
-      root.style.setProperty('--paper',value.paper || '#FFFFFF');
-      root.style.setProperty('--ink',value.ink || '#171614');
+      const customTokens = {
+        '--bg':value.bg||'#F7F6F3','--paper':value.paper||'#FFFFFF','--paper-2':value.paper2||'#F0EFEB',
+        '--ink':value.ink||'#171614','--ink-2':value.ink2||'#45423E','--muted':value.muted||'#85817B',
+        '--line':value.line||'#E5E2DC','--line-2':value.line2||'#D4D0C8',
+        '--rail':value.rail||'#FBFAF8','--rail-ink':value.railInk||'#171614'
+      };
+      Object.entries(customTokens).forEach(([token,color])=>root.style.setProperty(token,color));
     } else {
-      root.style.removeProperty('--bg');
-      root.style.removeProperty('--paper');
-      root.style.removeProperty('--ink');
+      ['--bg','--paper','--paper-2','--ink','--ink-2','--muted','--line','--line-2','--rail','--rail-ink'].forEach(token=>root.style.removeProperty(token));
     }
+    if(value.fontUi)root.style.setProperty('--font-ui',value.fontUi);
+    if(value.fontMono)root.style.setProperty('--font-mono',value.fontMono);
     root.style.fontSize = ({100:'14px',110:'15.4px',125:'17.5px'})[value.fontScale] || '14px';
   }
 
@@ -1626,7 +1630,24 @@
         '<input id="settingPaper" type="color" value="' + escapeHtml(value.paper || '#FFFFFF') + '">') +
       settingRow('Main text','Primary interface text colour.',
         '<input id="settingInk" type="color" value="' + escapeHtml(value.ink || '#171614') + '">') +
-
+      settingRow('Secondary surface','Toolbar, hover and secondary card surface.',
+        '<input id="settingPaper2" type="color" value="' + escapeHtml(value.paper2 || '#F0EFEB') + '">') +
+      settingRow('Secondary text','Labels and supporting text.',
+        '<input id="settingInk2" type="color" value="' + escapeHtml(value.ink2 || '#45423E') + '">') +
+      settingRow('Muted text','Hints, timestamps and secondary labels.',
+        '<input id="settingMuted" type="color" value="' + escapeHtml(value.muted || '#85817B') + '">') +
+      settingRow('Borders','Dividers and subtle outlines.',
+        '<input id="settingLine" type="color" value="' + escapeHtml(value.line || '#E5E2DC') + '">') +
+      settingRow('Strong borders','Active outlines and controls.',
+        '<input id="settingLine2" type="color" value="' + escapeHtml(value.line2 || '#D4D0C8') + '">') +
+      settingRow('Sidebar surface','Project navigation surface.',
+        '<input id="settingRail" type="color" value="' + escapeHtml(value.rail || '#FBFAF8') + '">') +
+      settingRow('Sidebar text','Project navigation text.',
+        '<input id="settingRailInk" type="color" value="' + escapeHtml(value.railInk || '#171614') + '">') +
+      settingRow('UI font family','Use a font installed on this Windows PC.',
+        '<input id="settingFontUi" class="wide-input" value="' + escapeHtml(value.fontUi || 'Inter, Segoe UI, system-ui, sans-serif') + '">') +
+      settingRow('Monospace font','Timecodes and technical values.',
+        '<input id="settingFontMono" class="wide-input" value="' + escapeHtml(value.fontMono || 'Geist Mono, Consolas, monospace') + '">') +
       settingRow('Font size','Scale the editor interface.',
         '<select id="settingFont"><option value="100">100%</option><option value="110">110%</option><option value="125">125%</option></select>') +
       settingRow('Density','Choose control spacing.',
@@ -1649,6 +1670,9 @@
       const next = {
         mode:$id('settingTheme').value,accent:$id('settingAccent').value,
         bg:$id('settingBg').value,paper:$id('settingPaper').value,ink:$id('settingInk').value,
+        paper2:$id('settingPaper2').value,ink2:$id('settingInk2').value,muted:$id('settingMuted').value,
+        line:$id('settingLine').value,line2:$id('settingLine2').value,rail:$id('settingRail').value,
+        railInk:$id('settingRailInk').value,fontUi:$id('settingFontUi').value,fontMono:$id('settingFontMono').value,
         fontScale:Number($id('settingFont').value),density:$id('settingDensity').value,
         reduceMotion:$id('settingMotion').checked,windowMaterial:$id('settingMaterial').value
       };
@@ -1658,7 +1682,7 @@
         settingsStatus('Saved',true);
       } catch (error) { settingsStatus(error.message,false); }
     };
-    ['settingTheme','settingAccent','settingBg','settingPaper','settingInk','settingFont','settingDensity','settingMotion','settingMaterial'].forEach(id =>
+    ['settingTheme','settingAccent','settingBg','settingPaper','settingInk','settingPaper2','settingInk2','settingMuted','settingLine','settingLine2','settingRail','settingRailInk','settingFontUi','settingFontMono','settingFont','settingDensity','settingMotion','settingMaterial'].forEach(id =>
       $id(id).addEventListener('change',save));
   }
 
