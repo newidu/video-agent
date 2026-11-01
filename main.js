@@ -335,6 +335,10 @@ ipcMain.handle('window:settings', () => { openSettingsWindow(); return true; });
 ipcMain.handle('window:reveal-data', async () => { await shell.openPath(DATA()); return DATA(); });
 
 ipcMain.handle('projects:get-root', () => workspaceRoot());
+ipcMain.handle('projects:get-workspace-info', () => {
+  const saved = readConfig('workspace', { root: null });
+  return { root: workspaceRoot(), configured: !!(saved && saved.root) };
+});
 ipcMain.handle('projects:choose-root', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Choose where AI Video Agent projects are saved',
