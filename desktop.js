@@ -2207,7 +2207,7 @@
       settingCard('Save your own motion code','Write a deterministic JavaScript function using ctx, e, H, t, dur, w and h. It runs inside the existing selectable canvas-code element.',
         '<label class="field">Preset name<input id="motionName" maxlength="80" placeholder="e.g. Brand logo reveal"></label>'+
         '<label class="field">Description<input id="motionDescription" maxlength="180" placeholder="What this motion does"></label>'+
-        '<label class="field">JavaScript code<textarea id="motionCode" rows="7" spellcheck="false" placeholder="ctx.save();\\nH.circle(0,0,Math.min(w,h)*0.2);\\nH.stroke(()=>H.circle(0,0,Math.min(w,h)*0.2), e.color || \\'#C65A2E\\', 4);\\nctx.restore();"></textarea></label>'+
+        '<label class="field">JavaScript code<textarea id="motionCode" rows="7" spellcheck="false" placeholder="ctx.save(); H.circle(0,0,Math.min(w,h)*0.2); H.stroke(()=>H.circle(0,0,Math.min(w,h)*0.2), e.color || &quot;#C65A2E&quot;, 4); ctx.restore();"></textarea></label>'+
         '<div class="setting-actions"><button id="saveMotionCode" class="primary">Save motion preset</button></div>') +
       settingCard('Import Lottie animation','Import a .json Lottie Bodymovin animation. The JSON is validated and stored in the local motion library; the agent can add it as a time-seekable animation.',
         '<label class="field">Animation name<input id="lottieName" maxlength="80" placeholder="e.g. Animated logo"></label>'+
