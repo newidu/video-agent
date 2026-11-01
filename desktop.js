@@ -72,6 +72,7 @@
     newButton.onclick = () => createNewProject();
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     if ($id('btnSave')) $id('btnSave').onclick = saveProject;
+    if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     if ($id('btnReset')) $id('btnReset').style.display = 'none';
   }
 
@@ -320,6 +321,8 @@
     }
     // Never put the key into the DOM, localStorage, or chat history.
     if ($id('apiKey')) $id('apiKey').value = '';
+    window.apiKey = () => providerReady ? 'secure-provider-configured' : '';
+    window.apiBase = () => activeProvider ? activeProvider.base_url.replace(/\\/+$/, '') : 'https://api.deepseek.com';
     if (typeof SECRETS !== 'undefined') {
       SECRETS.get = () => providerReady ? 'secure-provider-configured' : '';
       SECRETS.stored = () => '';
@@ -879,9 +882,6 @@
       if (view !== 'settings') A.app.openSettings();
     }
   });
-
-  // Export the original data format only through Electron's native save dialog.
-  window.exportPoster = null;
 
   if (view === 'settings') initSettings();
   else {
