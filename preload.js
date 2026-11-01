@@ -5,6 +5,10 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 const invoke = (channel, ...args) => ipcRenderer.invoke(channel, ...args);
 
 contextBridge.exposeInMainWorld('aiva', Object.freeze({
+  theme: {
+    exportFile: () => invoke('theme:export'),
+    importFile: () => invoke('theme:import')
+  },
   app: {
     info: () => invoke('app:info'),
     openSettings: () => invoke('window:settings'),
