@@ -278,7 +278,7 @@
         open.title = project.name;
         open.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 7h7l2 2h7v10H4z"/><path d="M4 7V5h7l2 2"/></svg><span><strong></strong><small></small></span>';
         open.querySelector('strong').textContent = project.name;
-        const date = project.updatedAt || project.lastOpenedAt || project.createdAt;
+        const date = project.lastOpenedAt || project.updatedAt || project.createdAt;
         open.querySelector('small').textContent = date ? new Date(date).toLocaleDateString() : 'Project';
         open.onclick = () => openProject(project.id);
         const more = document.createElement('button');
