@@ -486,3 +486,88 @@ body.sidebar-hidden #agentPane{width:44%;flex-basis:44%}
   #editPane{max-width:calc(100vw - 24px);right:12px}
   .new-project-dialog{padding:20px 17px 15px}
 }
+
+
+
+/* Settings window: transparent Mica/Acrylic remains visible behind translucent sheets. */
+html[data-view="settings"] .settings-shell{
+  background:rgba(247,246,243,.66);
+  color:var(--ink);
+  backdrop-filter:blur(34px) saturate(1.18);
+  -webkit-backdrop-filter:blur(34px) saturate(1.18)
+}
+html[data-view="settings"][data-theme="dark"] .settings-shell{background:rgba(22,21,19,.66);color:var(--ink)}
+html[data-view="settings"] .settings-rail{background:rgba(255,255,255,.30);border-right-color:var(--line)}
+html[data-view="settings"][data-theme="dark"] .settings-rail{background:rgba(0,0,0,.14);border-right-color:var(--line)}
+html[data-view="settings"] .settings-main{background:transparent}
+html[data-view="settings"] .settings-card{
+  background:rgba(255,255,255,.68);border-color:var(--line);color:var(--ink);
+  box-shadow:0 1px 2px rgba(0,0,0,.025)
+}
+html[data-view="settings"][data-theme="dark"] .settings-card{background:rgba(29,27,25,.70);border-color:var(--line)}
+html[data-view="settings"] .settings-card h2,
+html[data-view="settings"] .setting-row label{color:var(--ink)}
+html[data-view="settings"] .settings-card p,
+html[data-view="settings"] .setting-row small{color:var(--muted)}
+html[data-view="settings"] .setting-row{border-color:var(--line)}
+html[data-view="settings"] .setting-row input:not([type=checkbox]):not([type=color]),
+html[data-view="settings"] .setting-row select,
+html[data-view="settings"] .setting-row textarea{
+  background:var(--paper);color:var(--ink);border:1px solid var(--line);border-radius:7px
+}
+html[data-view="settings"] .settings-nav{color:var(--ink-2)}
+html[data-view="settings"] .settings-nav.active{background:var(--accent-soft);color:var(--ink);box-shadow:inset 2px 0 var(--accent)}
+html[data-view="settings"] .settings-top{border-color:var(--line)}
+html[data-view="settings"] .settings-top h1{color:var(--ink)}
+.wide-input{width:250px!important;max-width:58%!important}
+.integration-grid{display:flex;flex-direction:column}
+.integration-actions{display:flex;align-items:center;gap:12px;padding-top:10px;border-top:1px solid var(--line)}
+.integration-actions button{height:30px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);font-size:10px}
+.integration-actions button:hover{border-color:var(--accent);color:var(--accent)}
+.integration-actions button:disabled{opacity:.45;cursor:wait}
+.integration-status{font-size:10px;color:var(--muted)}
+.integration-status.ok{color:var(--ok)}
+.motion-presets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.motion-preset{min-height:66px;padding:10px 11px;display:flex;flex-direction:column;align-items:flex-start;gap:5px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);text-align:left}
+.motion-preset:hover{background:var(--accent-soft);border-color:var(--accent)}
+.motion-preset strong{font-size:10.5px;font-weight:650}
+.motion-preset small{font-size:9px;color:var(--muted);line-height:1.35}
+.settings-note{padding:9px 10px;border-radius:7px;background:var(--paper-2);color:var(--muted);font-size:9.5px}
+.settings-card .setting-actions{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.settings-card .setting-actions button{min-height:30px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper);color:var(--ink);font-size:10px}
+.settings-card .setting-actions button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.aiva-modal-backdrop{position:fixed;inset:0;z-index:280;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(18,17,15,.38);backdrop-filter:blur(8px)}
+.aiva-modal{width:min(540px,calc(100vw - 30px));max-height:min(720px,calc(100vh - 40px));overflow:auto;padding:17px;border:1px solid var(--line);border-radius:13px;background:var(--paper);color:var(--ink);box-shadow:var(--shadow-pop)}
+.aiva-modal>header{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.aiva-modal>header strong{font-size:13px;font-weight:680}
+.aiva-modal>header small{display:block;margin-top:3px;color:var(--muted);font-size:9.5px}
+.aiva-modal>header .icon{width:27px;height:27px;border:0;border-radius:6px;background:var(--paper-2);color:var(--muted);font-size:17px}
+.version-actions{display:flex;justify-content:flex-end;gap:7px;padding:10px 0}
+.version-actions button{min-height:30px;padding:0 10px;border:1px solid var(--line);border-radius:7px;background:var(--paper-2);color:var(--ink);font-size:10px}
+.version-actions button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.version-list{display:flex;flex-direction:column;gap:6px}
+.version-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px;border:1px solid var(--line);border-radius:8px;background:var(--paper-2)}
+.version-row>div{min-width:0;display:flex;flex-direction:column;gap:3px}
+.version-row strong{font-size:10.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.version-row small{font-size:9px;color:var(--muted)}
+.version-row button{height:28px;padding:0 9px;border:1px solid var(--line);border-radius:6px;background:var(--paper);color:var(--ink);font-size:9.5px}
+.history-empty{padding:24px 10px;text-align:center;color:var(--muted);font-size:10px}
+.comment-modal textarea{width:100%;margin:13px 0 6px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);font:12px/1.5 var(--font-ui);resize:vertical}
+.comment-markers{position:absolute;inset:0;z-index:18;pointer-events:none}
+.video-comment-marker{position:absolute;transform:translate(-50%,-50%);width:22px;height:22px;display:grid;place-items:center;border:2px solid #fff;border-radius:50%;background:var(--accent);color:#fff;font:700 9px var(--font-ui);box-shadow:0 2px 8px #0005;pointer-events:auto;cursor:pointer}
+.video-comment-marker.resolved{opacity:.48;background:var(--muted)}
+.transport .iconBtn{width:30px;height:30px;min-width:30px;display:grid;place-items:center;padding:0;border:0;border-radius:7px;background:transparent;color:var(--muted);font-size:0}
+.transport .iconBtn svg{width:16px;height:16px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.transport .iconBtn.active{background:var(--accent-soft);color:var(--accent)}
+.comments-panel{position:fixed;z-index:200;right:18px;bottom:66px;width:min(330px,calc(100vw - 36px));max-height:48vh;overflow:auto;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--paper);box-shadow:var(--shadow-pop)}
+.comments-panel>header{display:flex;justify-content:space-between;align-items:center;padding:4px 5px 9px;border-bottom:1px solid var(--line)}
+.comments-panel>header strong{font-size:11px}
+.comments-panel>header button{border:0;background:transparent;color:var(--muted);font-size:18px}
+.comment-list-row{width:100%;display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:9px 7px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);text-align:left}
+.comment-list-row:hover{background:var(--paper-2)}
+.comment-list-row span{font-size:10px;line-height:1.4}
+.comment-list-row small{font:9px var(--font-mono);color:var(--muted)}
+.project-title-button{font-family:var(--font-ui)}
+#editPane.is-open{animation:aivaPanelIn .16s ease-out}
+@keyframes aivaPanelIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:680px){.motion-presets{grid-template-columns:1fr}}
