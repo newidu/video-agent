@@ -63,13 +63,17 @@
       '<circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.2 2.1-2.1 2.1-2.1-1.2-.1-.1a8 8 0 0 1-2 .8l-.1.1-.3 2.4h-3l-.3-2.4-.1-.1a8 8 0 0 1-2-.8l-.1.1-2.1 1.2-2.1-2.1 1.2-2.1.1-.1a8 8 0 0 1-.8-2l-.1-.1L2 12.6v-3l2.4-.3.1-.1a8 8 0 0 1 .8-2L4 5l2.1-2.1 2.1 1.2.1.1a8 8 0 0 1 2-.8l.1-.1.3-2.4h3l.3 2.4.1.1a8 8 0 0 1 2 .8l2.1-1.2L20.4 5l-1.2 2.1-.1.1a8 8 0 0 1 .8 2l2.4.3v3l-2.4.3-.1.1a8 8 0 0 1-.8 2Z"/>');
     const newButton = ensureSvgButton('btnNewProject', 'New project',
       '<path d="M12 5v14M5 12h14"/>');
+    const shareButton = ensureSvgButton('btnShare', 'Share project',
+      '<path d="M12 16V3m-5 5 5-5 5 5"/><path d="M5 13v7h14v-7"/>');
     const first = $id('formatSel');
     header.insertBefore(projectButton, first);
     header.insertBefore(settingsButton, first);
     header.insertBefore(newButton, first);
+    header.insertBefore(shareButton, first);
     projectButton.onclick = openProjectGallery;
     settingsButton.onclick = () => A.app.openSettings();
     newButton.onclick = () => createNewProject();
+    shareButton.onclick = showShareMenu;
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     if ($id('btnSave')) $id('btnSave').onclick = saveProject;
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
@@ -269,9 +273,10 @@
     const el = document.createElement('section');
     el.id = 'homeScreen';
     el.className = 'home-screen';
-    el.innerHTML = '<div class="home-head"><div><h1>Projects</h1><p>Your projects stay on this Windows device.</p></div><span class="spacer"></span><button id="homeNewProject" class="primary">+ New project</button><button id="homeClose">Close</button></div><div id="projectGrid" class="home-grid"></div>';
+    el.innerHTML = '<div class="home-head"><div><h1>Projects</h1><p>Your projects stay on this Windows device.</p></div><span class="spacer"></span><button id="homeImportProject">Import .aivp</button><button id="homeNewProject" class="primary">+ New project</button><button id="homeClose">Close</button></div><div id="projectGrid" class="home-grid"></div>';
     document.body.appendChild(el);
     $id('homeNewProject').onclick = () => createNewProject();
+    $id('homeImportProject').onclick = importProjectFile;
     $id('homeClose').onclick = () => el.classList.remove('open');
   }
 
@@ -315,6 +320,56 @@
     } else {
       await persistNow();
     }
+  }
+
+  async function importProjectFile() {
+    try {
+      const result = await A.project.importFile();
+      if (result && result.imported && result.project) {
+        await openProject(result.project.id);
+        status('Imported · ' + result.project.name);
+      }
+    } catch (error) {
+      status('Import failed · ' + error.message);
+    }
+  }
+
+  function showShareMenu() {
+    let menu = $id('sharePopover');
+    if (menu) { menu.remove(); return; }
+    menu = document.createElement('div');
+    menu.id = 'sharePopover';
+    menu.className = 'share-popover';
+    menu.innerHTML =
+      '<div class="share-title">Share project</div>' +
+      '<button id="shareAivp"><strong>Editable project</strong><small>Save one .aivp file with project data and skills.</small></button>' +
+      '<button id="shareHtml"><strong>Standalone HTML</strong><small>Offline video player for any modern browser.</small></button>';
+    document.body.appendChild(menu);
+    $id('shareAivp').onclick = async () => {
+      try {
+        if (!projectId) await createNewProject((SPEC && SPEC.title) || 'Untitled project');
+        await persistNow();
+        const result = await A.project.exportBundle(currentProjectData());
+        menu.remove();
+        if (result && result.saved) status('Project bundle saved · ' + result.path);
+      } catch (error) { status('Share failed · ' + error.message); }
+    };
+    $id('shareHtml').onclick = async () => {
+      try {
+        if (!projectId) await createNewProject((SPEC && SPEC.title) || 'Untitled project');
+        await persistNow();
+        const result = await A.project.exportHtml(currentProjectData());
+        menu.remove();
+        if (result && result.saved) status('Standalone HTML saved · ' + result.path);
+      } catch (error) { status('HTML export failed · ' + error.message); }
+    };
+    const close = event => {
+      if (!menu.contains(event.target) && event.target !== $id('btnShare')) {
+        menu.remove();
+        document.removeEventListener('pointerdown',close,true);
+      }
+    };
+    setTimeout(() => document.addEventListener('pointerdown',close,true),0);
   }
 
   async function loadProviderConfig() {
