@@ -110,9 +110,43 @@
     if ($id('btnLoad')) $id('btnLoad').onclick = openProjectGallery;
     if ($id('btnSave')) $id('btnSave').onclick = saveProject;
     if ($id('btnReset')) $id('btnReset').style.display = 'none';
-    ['btnMusic','btnMusicOn','btnFont','btnLoad','btnSave','btnPoster'].forEach(id => {
+    ['btnRestart','btnLetter','btnCrop','btnMusic','btnMusicOn','btnFont','btnLoad','btnSave','btnPoster'].forEach(id => {
       if ($id(id)) $id(id).style.display = 'none';
     });
+    const iconMarkup = {
+      btnPlay: '<svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>',
+      btnUndo: '<svg viewBox="0 0 24 24"><path d="M9 7 4 12l5 5"/><path d="M4 12h9a7 7 0 0 1 7 7"/></svg>',
+      btnRedo: '<svg viewBox="0 0 24 24"><path d="m15 7 5 5-5 5"/><path d="M20 12h-9a7 7 0 0 0-7 7"/></svg>',
+      btnExport: '<svg viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5"/><path d="M4 17v4h16v-4"/></svg>'
+    };
+    Object.entries(iconMarkup).forEach(([id,markup]) => {
+      const button = $id(id);
+      if (!button) return;
+      button.classList.add('iconBtn');
+      button.innerHTML = markup;
+      button.setAttribute('aria-label',button.title || id);
+      if (!button.title) button.title = id === 'btnPlay' ? 'Play / pause' : id === 'btnExport' ? 'Export video' : id === 'btnUndo' ? 'Undo' : 'Redo';
+    });
+    if ($id('btnPlay')) {
+      const originalSync = window.syncPlayBtn;
+      window.syncPlayBtn = function () {
+        if (typeof originalSync === 'function') originalSync();
+        const button = $id('btnPlay');
+        if (!button) return;
+        const isPlaying = !!window.playing;
+        button.innerHTML = isPlaying
+          ? '<svg viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>'
+          : '<svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7z"/></svg>';
+        button.title = isPlaying ? 'Pause' : 'Play';
+        button.setAttribute('aria-label',button.title);
+      };
+      window.syncPlayBtn();
+      const originalPlay = $id('btnPlay').onclick;
+      $id('btnPlay').onclick = function () {
+        if (typeof originalPlay === 'function') originalPlay.apply(this,arguments);
+        window.syncPlayBtn();
+      };
+    }
     updateProjectTitle();
   }
 
@@ -364,6 +398,36 @@
     };
     updatePath();
     $id('newProjectName').focus();
+  }
+
+  function installComposerUI() {
+    const send = $id('btnSend');
+    const stop = $id('btnStop');
+    if (send) {
+      send.innerHTML = '<svg viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>';
+      send.title = 'Send message';
+      send.setAttribute('aria-label','Send message');
+    }
+    if (stop) {
+      stop.innerHTML = '<svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+      stop.title = 'Stop agent';
+      stop.setAttribute('aria-label','Stop agent');
+    }
+    const input = $id('fileVideo');
+    if (input && !$id('btnAttachVideo')) {
+      const attach = document.createElement('button');
+      attach.id = 'btnAttachVideo';
+      attach.type = 'button';
+      attach.className = 'iconBtn composer-attach';
+      attach.title = 'Attach a video';
+      attach.setAttribute('aria-label','Attach a video');
+      attach.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="m10 13 5 3-5 3z"/></svg>';
+      attach.onclick = () => input.click();
+      const row = send && send.parentElement;
+      if (row) row.insertBefore(attach,send);
+      const oldLabel = input.closest('.filebtn');
+      if (oldLabel) oldLabel.style.display = 'none';
+    }
   }
 
   function installSelectionContext() {
@@ -1367,6 +1431,7 @@
     installProjectSidebar();
     installProjectGallery();
     installSelectionContext();
+    installComposerUI();
     installSecureAgent();
     installToolPolicy();
     installPlayerControls();
