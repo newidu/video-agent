@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     save: project => invoke('projects:save', project),
     rename: (id, name) => invoke('projects:rename', id, name),
     delete: id => invoke('projects:delete', id),
+    duplicate: id => invoke('projects:duplicate', id),
+    reveal: id => invoke('projects:reveal', id),
+    getRoot: () => invoke('projects:get-root'),
+    chooseRoot: () => invoke('projects:choose-root'),
     importFile: () => invoke('projects:import'),
     exportBundle: project => invoke('share:bundle', project),
     exportHtml: project => invoke('share:html', project)
@@ -32,6 +36,10 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
     chat: payload => invoke('ai:chat', payload),
     cancel: requestId => invoke('ai:cancel', requestId)
   },
+  ui: {
+    get: () => invoke('ui:get'),
+    save: value => invoke('ui:save', value)
+  },
   settings: {
     get: () => invoke('settings:get'),
     saveAppearance: value => invoke('settings:save-appearance', value),
@@ -41,6 +49,7 @@ contextBridge.exposeInMainWorld('aiva', Object.freeze({
   },
   export: {
     image: (dataUrl, name) => invoke('export:image', dataUrl, name),
+    revealFile: filePath => invoke('export:reveal-file', filePath),
     begin: options => invoke('ffmpeg:begin', options),
     writeFrame: (id, index, dataUrl) => invoke('ffmpeg:write-frame', id, index, dataUrl),
     finish: id => invoke('ffmpeg:finish', id),
