@@ -530,7 +530,9 @@
       'particle-field': {name:'Particle field',js:'ctx.save(); for(let i=0;i<28;i++){ const x=(i*97%w), y=(i*173%h); const xx=(x+Math.sin(t*0.6+i)*28+w)%w, yy=(y+Math.cos(t*0.7+i)*24+h)%h; ctx.beginPath(); ctx.arc(xx,yy,2+(i%3),0,Math.PI*2); ctx.fillStyle=i%4?"#171614":"#C65A2E"; ctx.globalAlpha=0.35; ctx.fill(); } ctx.restore();'},
       waveform: {name:'Waveform',js:'ctx.save(); ctx.lineWidth=3; ctx.strokeStyle="#C65A2E"; ctx.globalAlpha=0.8; ctx.beginPath(); for(let x=0;x<=w;x+=8){ const y=h/2+Math.sin(x*0.035-t*2)*Math.sin(x*0.011+t)*h*0.12; if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y); } ctx.stroke(); ctx.restore();'},
       'product-spotlight': {name:'Product spotlight',js:'ctx.save(); const r=Math.min(w,h)*0.28; const g=ctx.createRadialGradient(w/2,h/2,2,w/2,h/2,r); g.addColorStop(0,"rgba(198,90,46,0.2)"); g.addColorStop(1,"rgba(198,90,46,0)"); ctx.fillStyle=g; ctx.fillRect(0,0,w,h); ctx.strokeStyle="#C65A2E"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(w/2,h/2,r,0.1+t*0.35,Math.PI*1.6+t*0.35); ctx.stroke(); ctx.restore();'},
-      'data-bars': {name:'Data bars',js:'ctx.save(); const vals=[0.45,0.8,0.62,0.95,0.55]; const gap=12, bw=(w-4*gap)/5; vals.forEach((v,i)=>{ const bh=(h*0.62)*v*(0.94+0.06*Math.sin(t*2+i)); const x=i*(bw+gap), y=h-bh; ctx.fillStyle=i===3?"#C65A2E":"#171614"; ctx.globalAlpha=0.78; ctx.fillRect(x,y,bw,bh); }); ctx.restore();'}
+      'data-bars': {name:'Data bars',js:'ctx.save(); const vals=[0.45,0.8,0.62,0.95,0.55]; const gap=12, bw=(w-4*gap)/5; vals.forEach((v,i)=>{ const bh=(h*0.62)*v*(0.94+0.06*Math.sin(t*2+i)); const x=i*(bw+gap), y=h-bh; ctx.fillStyle=i===3?"#C65A2E":"#171614"; ctx.globalAlpha=0.78; ctx.fillRect(x,y,bw,bh); }); ctx.restore();'},
+      'cube-3d': {name:'3D cube',js:'H.cube3D(-w/2,-h/2,w,h,t,"#C65A2E");'},
+      'sphere-3d': {name:'3D sphere',js:'H.sphere3D(-w/2,-h/2,w,h,t,"#C65A2E");'}
     };
     window.AIVA_MOTION_PRESETS = presets;
     const descriptions = {
@@ -550,18 +552,38 @@
       const kit=window.AIVA_BRAND_KIT || (settingsData && settingsData.brandKit) || {};
       return JSON.stringify({name:kit.name||'',primary:kit.primary||'#171614',secondary:kit.secondary||'#F7F6F3',accent:kit.accent||'#C65A2E',headingFont:kit.headingFont||'Inter',bodyFont:kit.bodyFont||'Inter',logoAvailable:!!kit.logoDataUrl,logoPosition:kit.logoPosition||'bottom-right',useLogo:kit.useLogo!==false});
     };
-    TOOL_IMPL.list_motion_presets = () => JSON.stringify(Object.values(presets).map(p=>({name:p.name,description:p.description||'Editable JavaScript canvas composition'})));
-    TOOL_IMPL.apply_motion_preset = args => {
+    TOOL_IMPL.list_motion_presets = async () => {
+      const builtins=Object.entries(presets).map(([id,p])=>({id,name:p.name,description:p.description||'Editable JavaScript canvas composition',type:'code',builtIn:true}));
+      const saved=window.aiva && window.aiva.motion ? await window.aiva.motion.list() : [];
+      return JSON.stringify(builtins.concat(saved.map(item=>({...item,builtIn:false}))));
+    };
+    TOOL_IMPL.apply_motion_preset = async args => {
       const id=String(args && args.preset || 'orbital-rings');
-      const preset=presets[id];
-      if(!preset)return 'Unknown motion preset. Use list_motion_presets first.';
+      let preset=presets[id] || null;
+      let code='';
+      let label='';
+      if(preset){
+        code=preset.js;label=preset.name;
+      }else{
+        if(!window.aiva || !window.aiva.motion)return 'The saved motion library is unavailable.';
+        const saved=await window.aiva.motion.get(id);
+        label=saved.name || 'Saved motion';
+        if(saved.type==='lottie'){
+          SPEC.motionAssets=SPEC.motionAssets||{};
+          SPEC.motionAssets[id]=saved.animationData;
+          code='H.lottie('+JSON.stringify(id)+',-w/2,-h/2,w,h,t,dur);';
+        }else{
+          code=String(saved.js||'');
+        }
+      }
+      if(!code.trim())return 'This motion preset has no renderable code.';
       const sceneId=String(args && args.sceneId || (SPEC.scenes[0] && SPEC.scenes[0].id) || '');
       const scene=SPEC.scenes.find(item=>item.id===sceneId);
       if(!scene)return 'Build or select a scene first.';
       scene.elements=scene.elements||[];
-      scene.elements.push({id:scene.id+'.motion'+(scene.elements.length+1),type:'code',label:preset.name+' · reusable motion',x:W/2,y:H/2,w:W,h:H,js:preset.js,anim:'none',delay:0});
-      buildScenes();syncSpec();renderFrame(time);renderPanel();
-      return 'Added '+preset.name+' as editable JavaScript canvas code in '+scene.name+'.';
+      scene.elements.push({id:scene.id+'.motion'+(scene.elements.length+1),type:'code',label:label+' · reusable motion',x:W/2,y:H/2,w:W,h:H,js:code,anim:'none',delay:0});
+      buildScenes();syncSpec();renderFrame(time);renderPanel();scheduleSave();
+      return 'Added '+label+' as an editable '+(preset?'canvas code':'saved motion')+' element in '+scene.name+'.';
     };
     TOOL_IMPL.auto_transitions = args => {
       const mode=String(args && args.style || 'fade');
@@ -676,7 +698,8 @@
           smart_reframe:{type:'object',properties:{format:{type:'string',enum:['9:16','16:9','1:1']},focusX:{type:'number'},focusY:{type:'number'}},required:['format']},
           generate_voiceover:{type:'object',properties:{text:{type:'string'},voice:{type:'string'},volume:{type:'number'}},required:['text']},
           auto_transitions:{type:'object',properties:{style:{type:'string',enum:['fade','rise','slideL','slideR']},transition:{type:'string',enum:['fade','wipe-left','wipe-right','wipe-up','wipe-down']},duration:{type:'number'}},required:[]},
-          apply_motion_preset:{type:'object',properties:{preset:{type:'string',enum:Object.keys(presets)},sceneId:{type:'string'}},required:['preset']},
+          list_motion_presets:{type:'object',properties:{},required:[]},
+          apply_motion_preset:{type:'object',properties:{preset:{type:'string',description:'Built-in id or saved motion preset id returned by list_motion_presets'},sceneId:{type:'string'}},required:['preset']},
           add_video_comment:{type:'object',properties:{text:{type:'string'},time:{type:'number'},x:{type:'number'},y:{type:'number'}},required:['text']}
         };
         return schema.concat(Object.keys(extras).filter(name=>TOOL_IMPL[name]).map(name=>({type:'function',function:{name,description:TOOL_HELP[name]||name,parameters:extras[name]}})));
