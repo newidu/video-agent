@@ -21,6 +21,8 @@
   let projectName = 'Untitled project';
   let saveTimer = null;
   let loadingProject = false;
+  let lastSavedFingerprint = '';
+  let lastSavedSnapshot = null;
   let ffmpegAvailable = false;
   let muted = false;
   let projectComments = [];
@@ -732,23 +734,7 @@
         return prompt;
       };
     }
-    const previousRun=window.runAgent;
-    if(previousRun && !window.__AIVA_VERSION_WRAPPER__){
-      window.__AIVA_VERSION_WRAPPER__=true;
-      window.runAgent=async function(){
-        const before=JSON.stringify(window.SPEC||{});
-        const result=await previousRun.apply(this,arguments);
-        if(projectId && !window.__EXPORTING){
-          const after=JSON.stringify(window.SPEC||{});
-          if(before!==after){
-            try{await A.project.createVersion(projectId,String(arguments[0]||'AI iteration').slice(0,100),currentProjectData());}
-            catch(error){console.warn('Could not create project version',error);}
-            renderProjectSidebar();
-          }
-        }
-        return result;
-      };
-    }
+    // Automatic checkpoints are created from the last saved snapshot in persistNow().
   }
 
   function applyAivaBrandKit(kit) {
@@ -829,6 +815,11 @@
             const snapshot=await A.project.restoreVersion(projectId,version.id);
             applyProjectData(snapshot);
             projectId=snapshot.id;projectName=snapshot.name||projectName;
+            lastSavedSnapshot=JSON.parse(JSON.stringify(currentProjectData()));
+            lastSavedFingerprint=JSON.stringify({
+              spec:lastSavedSnapshot.spec,edit:lastSavedSnapshot.edit,music:lastSavedSnapshot.music,
+              sfx:lastSavedSnapshot.sfx,comments:lastSavedSnapshot.comments,brandKit:lastSavedSnapshot.brandKit
+            });
             renderStoredChat();updateProjectTitle();renderCommentMarkers();renderProjectSidebar();
             status('Restored · '+version.label);
             modal.remove();
@@ -1065,7 +1056,20 @@
     if (!payload) return;
     try {
       if ($id('saveIndicator')) $id('saveIndicator').classList.add('saving');
+      const fingerprint = JSON.stringify({
+        spec:payload.spec,edit:payload.edit,music:payload.music,sfx:payload.sfx,
+        comments:payload.comments,brandKit:payload.brandKit
+      });
+      if (lastSavedFingerprint && fingerprint !== lastSavedFingerprint && lastSavedSnapshot) {
+        try {
+          await A.project.createVersion(projectId,'Before edit · '+new Date().toLocaleString(),lastSavedSnapshot);
+        } catch (versionError) {
+          console.warn('Could not create automatic edit checkpoint',versionError);
+        }
+      }
       await A.project.save(payload);
+      lastSavedFingerprint = fingerprint;
+      lastSavedSnapshot = JSON.parse(JSON.stringify(payload));
       if ($id('saveIndicator')) {
         $id('saveIndicator').classList.remove('saving','error');
         $id('saveIndicator').classList.add('saved');
@@ -1220,6 +1224,8 @@
       const created = await A.project.create(title);
       projectId = created.id;
       projectName = created.name;
+      lastSavedFingerprint = '';
+      lastSavedSnapshot = null;
       SPEC = JSON.parse(JSON.stringify(DEFAULT_SPEC));
       SPEC.title = title;
       SPEC.format = ['16:9','9:16','1:1'].includes(options.format) ? options.format : '9:16';
@@ -1271,6 +1277,11 @@
       applyProjectData(data);
       projectId = data.id;
       projectName = data.name || data.spec.title || 'Untitled project';
+      lastSavedSnapshot = JSON.parse(JSON.stringify(currentProjectData()));
+      lastSavedFingerprint = JSON.stringify({
+        spec:lastSavedSnapshot.spec,edit:lastSavedSnapshot.edit,music:lastSavedSnapshot.music,
+        sfx:lastSavedSnapshot.sfx,comments:lastSavedSnapshot.comments,brandKit:lastSavedSnapshot.brandKit
+      });
       renderStoredChat();
       renderCommentMarkers();
       updateProjectTitle();
