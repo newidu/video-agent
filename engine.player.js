@@ -265,7 +265,6 @@
       ctx.fillStyle=item.color||item.fill||'#FFFFFF';ctx.fillText(text,0,0,W*.95);ctx.restore();
     }
 
-    const codeCache=new Map();
     function drawCode(item,localTime,sceneDuration,scene,absoluteTime){
       const source=String(item.js||'');
       if(!source.trim())return;
