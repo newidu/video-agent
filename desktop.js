@@ -906,7 +906,18 @@
   function applyAppearance(value) {
     if (!value) return;
     const root = document.documentElement;
-    root.dataset.theme = value.mode === 'dark' ? 'dark' : 'light';
+    const applyThemeMode = () => {
+      const systemDark=value.mode==='system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      root.dataset.theme = value.mode === 'dark' || systemDark ? 'dark' : 'light';
+    };
+    applyThemeMode();
+    if(value.mode==='system' && !window.__AIVA_SYSTEM_THEME_LISTENER__ && window.matchMedia){
+      const media=window.matchMedia('(prefers-color-scheme: dark)');
+      const listener=()=>applyThemeMode();
+      if(media.addEventListener)media.addEventListener('change',listener);
+      else if(media.addListener)media.addListener(listener);
+      window.__AIVA_SYSTEM_THEME_LISTENER__=listener;
+    }
     root.dataset.motion = value.reduceMotion ? 'reduced' : 'normal';
     root.dataset.density = value.density === 'compact' ? 'compact' : 'comfortable';
     root.style.setProperty('--accent', value.accent || '#C65A2E');
