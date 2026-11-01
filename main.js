@@ -1201,8 +1201,33 @@ ipcMain.handle('ffmpeg:begin', async (_event, options) => {
     audioPath = path.join(directory, 'music.' + audioExt);
     await fsp.writeFile(audioPath, audioBuffer);
   }
+  let sourceAudioPath=null;
+  if(typeof options.sourceVideoPath==='string' && options.sourceVideoPath){
+    try{
+      const source=validateMediaFile(options.sourceVideoPath);
+      sourceAudioPath=path.join(directory,'source-audio.wav');
+      const ranges=Array.isArray(options.keepRanges)?options.keepRanges.filter(r=>Number(r.end)>Number(r.start)).slice(0,250):[];
+      let audioArgs=['-hide_banner','-y','-i',source];
+      if(ranges.length){
+        const filters=ranges.map((range,index)=>
+          '[0:a:0]atrim=start='+Math.max(0,Number(range.start)||0).toFixed(4)+':end='+Math.max(0,Number(range.end)||0).toFixed(4)+',asetpts=PTS-STARTPTS[a'+index+']'
+        );
+        const concat=ranges.map((_range,index)=>'[a'+index+']').join('')+'concat=n='+ranges.length+':v=0:a=1[outa]';
+        filters.push(concat);
+        audioArgs.push('-filter_complex',filters.join(';'),'-map','[outa]');
+      }else{
+        audioArgs.push('-map','0:a:0');
+      }
+      audioArgs.push('-vn','-ac','2','-ar','48000','-c:a','pcm_s16le',sourceAudioPath);
+      await runFfmpeg(getFfmpegPath(),audioArgs,180000);
+    }catch(error){
+      sourceAudioPath=null;
+      await fsp.rm(path.join(directory,'source-audio.wav'),{force:true}).catch(()=>{});
+      mainWindow?.webContents.send('export:progress',{phase:'warning',message:'Source clip audio was unavailable; video export will continue without it.'});
+    }
+  }
   JOBS.set(id, {
-    directory, fps, duration, count, ext, audioPath,
+    directory, fps, duration, count, ext, audioPath, sourceAudioPath,
     audioVolume: Math.max(0, Math.min(1, Number(options.audioVolume) || 0.8)),
     written: 0, canceled: false, child: null
   });
@@ -1246,12 +1271,29 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
     '-hide_banner', '-y', '-framerate', String(job.fps),
     '-start_number', '0', '-i', frames
   ];
-  if (job.audioPath) {
-    args.push('-stream_loop', '-1', '-i', job.audioPath);
+  let audioInputIndex=1;
+  let sourceAudioIndex=null;
+  let musicAudioIndex=null;
+  if(job.sourceAudioPath){
+    sourceAudioIndex=audioInputIndex++;
+    args.push('-i',job.sourceAudioPath);
   }
-  args.push('-t', String(job.duration), '-map', '0:v:0');
-  if (job.audioPath) {
-    args.push('-map', '1:a:0', '-filter:a', 'volume=' + job.audioVolume.toFixed(3), '-c:a', 'aac', '-b:a', '192k');
+  if(job.audioPath){
+    musicAudioIndex=audioInputIndex++;
+    args.push('-stream_loop','-1','-i',job.audioPath);
+  }
+  args.push('-t',String(job.duration),'-map','0:v:0');
+  if(sourceAudioIndex!==null && musicAudioIndex!==null){
+    const volume=job.audioVolume.toFixed(3);
+    args.push(
+      '-filter_complex',
+      '['+sourceAudioIndex+':a:0]aresample=48000[source];['+musicAudioIndex+':a:0]volume='+volume+',aresample=48000[music];[source][music]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[aout]',
+      '-map','[aout]','-c:a','aac','-b:a','192k'
+    );
+  }else if(sourceAudioIndex!==null){
+    args.push('-map',sourceAudioIndex+':a:0','-c:a','aac','-b:a','192k');
+  }else if(musicAudioIndex!==null){
+    args.push('-map',musicAudioIndex+':a:0','-filter:a','volume='+job.audioVolume.toFixed(3),'-c:a','aac','-b:a','192k');
   }
   let encoder='libx264';
   let encoderArgs=['-preset','medium','-crf','18'];
@@ -1288,7 +1330,7 @@ ipcMain.handle('ffmpeg:finish', async (_event, id) => {
     await fsp.rename(partial, output);
     const stat = await fsp.stat(output);
     mainWindow?.webContents.send('export:progress', { phase: 'done', value: 1 });
-    return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg', encoder, audio: Boolean(job.audioPath) };
+    return { saved: true, path: output, bytes: stat.size, engine: 'FFmpeg', encoder, audio: Boolean(job.audioPath || job.sourceAudioPath), sourceAudio: Boolean(job.sourceAudioPath), musicOrVoiceover: Boolean(job.audioPath) };
   } catch (error) {
     const partialStat=await fsp.stat(partial).catch(()=>null);
     if(partialStat && partialStat.size>0) {
