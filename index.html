@@ -4728,10 +4728,10 @@ document.getElementById('status').textContent = 'Blank stage — nothing is buil
 </script>
 <script src="desktop.js"></script>
 <script src="./node_modules/lottie-web/build/player/lottie.js"></script>
-<script type="module">
-  import * as THREE from './node_modules/three/build/three.module.js';
-  window.THREE = THREE;
-  window.__AIVA_THREE_READY__ = true;
+<script src="./assets/three.bundle.js"></script>
+<script>
+  window.THREE = window.THREE || null;
+  window.__AIVA_THREE_READY__ = !!window.THREE;
 </script>
 </body>
 </html>
