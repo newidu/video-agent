@@ -308,7 +308,7 @@
       ctx.save();ctx.globalAlpha=.92;ctx.drawImage(brandImage,x,y,width,height);ctx.restore();
     }
 
-    function renderFrame(time){
+    function renderFrameBase(time){
       current=clamp(Number(time)||0,0,duration);
       ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.clearRect(0,0,W,Hh);
       const at=sceneAt(current),scene=at.scene;
@@ -327,6 +327,59 @@
         });
       }
       drawBrandLogo();
+      if(typeof callbacks.onTime==='function'&&Math.abs(current-lastReported)>.02){
+        lastReported=current;callbacks.onTime(current,duration,at.index);
+      }
+      return current;
+    }
+
+    function renderFrame(time){
+      const at=sceneAt(time);
+      const scene=at.scene;
+      const transition=scene&&scene.transitionIn;
+      const transitionDuration=transition&&Math.max(.05,Number(transition.duration)||.45);
+      if(!transition||at.index<=0||at.local>=transitionDuration){
+        return renderFrameBase(time);
+      }
+      const previousAt=sceneAt(Math.max(0,at.offset-.001));
+      if(!previousAt.scene)return renderFrameBase(time);
+      const progress=clamp(at.local/transitionDuration);
+      let outgoing=global.__AIVA_PLAYER_TRANSITION_PREV__;
+      let incoming=global.__AIVA_PLAYER_TRANSITION_NEXT__;
+      if(!outgoing)outgoing=global.__AIVA_PLAYER_TRANSITION_PREV__=document.createElement('canvas');
+      if(!incoming)incoming=global.__AIVA_PLAYER_TRANSITION_NEXT__=document.createElement('canvas');
+      [outgoing,incoming].forEach(buffer=>{
+        if(buffer.width!==W||buffer.height!==Hh){buffer.width=W;buffer.height=Hh;}
+      });
+      const outCtx=outgoing.getContext('2d');
+      const inCtx=incoming.getContext('2d');
+      renderFrameBase(Math.max(previousAt.offset,previousAt.offset+previousAt.duration-.001));
+      outCtx.clearRect(0,0,W,Hh);
+      outCtx.drawImage(canvas,0,0,W,Hh);
+      renderFrameBase(time);
+      inCtx.clearRect(0,0,W,Hh);
+      inCtx.drawImage(canvas,0,0,W,Hh);
+      ctx.save();
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.globalAlpha=1;
+      ctx.clearRect(0,0,W,Hh);
+      ctx.drawImage(outgoing,0,0,W,Hh);
+      const type=String(transition.type||'fade');
+      if(type==='fade'){
+        ctx.globalAlpha=progress;
+        ctx.drawImage(incoming,0,0,W,Hh);
+      }else{
+        ctx.beginPath();
+        if(type==='wipe-left')ctx.rect(0,0,W*progress,Hh);
+        else if(type==='wipe-right')ctx.rect(W*(1-progress),0,W*progress,Hh);
+        else if(type==='wipe-up')ctx.rect(0,Hh*(1-progress),W,Hh*progress);
+        else if(type==='wipe-down')ctx.rect(0,0,W,Hh*progress);
+        else ctx.rect(0,0,W,Hh);
+        ctx.clip();
+        ctx.drawImage(incoming,0,0,W,Hh);
+      }
+      ctx.restore();
+      current=clamp(Number(time)||0,0,duration);
       if(typeof callbacks.onTime==='function'&&Math.abs(current-lastReported)>.02){
         lastReported=current;callbacks.onTime(current,duration,at.index);
       }
