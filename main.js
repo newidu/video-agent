@@ -194,8 +194,57 @@ function safeProjectId(id) {
   return value;
 }
 
+function workspaceRoot() {
+  const saved = readConfig('workspace', { root: null });
+  if (saved && typeof saved.root === 'string' && path.isAbsolute(saved.root)) return saved.root;
+  return path.join(app.getPath('documents'), 'AI Video Agent Projects');
+}
+
+function projectIndex() {
+  return readConfig('project-index', {});
+}
+
+function projectDirectory(id) {
+  const projectId = safeProjectId(id);
+  const indexed = projectIndex()[projectId];
+  if (typeof indexed === 'string' && path.isAbsolute(indexed)) return indexed;
+  return path.join(PROJECTS(), projectId);
+}
+
 function projectFile(id) {
-  return path.join(PROJECTS(), safeProjectId(id) + '.json');
+  const projectId = safeProjectId(id);
+  const indexed = projectIndex()[projectId];
+  if (typeof indexed === 'string' && path.isAbsolute(indexed)) {
+    return path.join(indexed, 'project.json');
+  }
+  const legacy = path.join(PROJECTS(), projectId + '.json');
+  if (fs.existsSync(legacy)) return legacy;
+  return path.join(PROJECTS(), projectId, 'project.json');
+}
+
+async function writeProjectIndex(id, directory) {
+  const index = projectIndex();
+  index[safeProjectId(id)] = directory;
+  await writeConfig('project-index', index);
+}
+
+async function saveNewProject(project) {
+  const directory = path.join(workspaceRoot(), safeProjectId(project.id));
+  await fsp.mkdir(directory, { recursive: true });
+  await writeProjectIndex(project.id, directory);
+  await writeJsonAtomic(path.join(directory, 'project.json'), project);
+  return project;
+}
+
+async function ensureProjectStorage(project) {
+  const file = projectFile(project.id);
+  if (!fs.existsSync(file)) {
+    const directory = path.join(workspaceRoot(), safeProjectId(project.id));
+    await fsp.mkdir(directory, { recursive: true });
+    await writeProjectIndex(project.id, directory);
+    return path.join(directory, 'project.json');
+  }
+  return file;
 }
 
 function makeProject(name) {
@@ -218,22 +267,37 @@ function makeProject(name) {
 
 async function projectList() {
   await fsp.mkdir(PROJECTS(), { recursive: true });
+  await fsp.mkdir(workspaceRoot(), { recursive: true });
+  const found = new Map();
+  const index = projectIndex();
+
+  for (const [id, directory] of Object.entries(index)) {
+    if (!/^prj_[a-zA-Z0-9_-]{4,80}$/.test(id) || typeof directory !== 'string' || !path.isAbsolute(directory)) continue;
+    const project = readJson(path.join(directory, 'project.json'), null);
+    if (project && project.id === id) {
+      found.set(id, project);
+    }
+  }
+
+  // Read older releases that stored project JSON files directly under userData/projects.
   const entries = await fsp.readdir(PROJECTS(), { withFileTypes: true });
-  const projects = [];
   for (const entry of entries) {
     if (!entry.isFile() || !/^prj_[\w-]+\.json$/.test(entry.name)) continue;
     const project = readJson(path.join(PROJECTS(), entry.name), null);
-    if (project && project.id) {
-      projects.push({
-        id: project.id,
-        name: project.name || 'Untitled project',
-        updatedAt: project.updatedAt || 0,
-        createdAt: project.createdAt || 0,
-        thumbnail: project.thumbnail || null
-      });
-    }
+    if (project && project.id && !found.has(project.id)) found.set(project.id, project);
   }
-  return projects.sort((a, b) => b.updatedAt - a.updatedAt);
+
+  return Array.from(found.values()).map(project => ({
+    id: project.id,
+    name: project.name || 'Untitled project',
+    updatedAt: project.updatedAt || 0,
+    createdAt: project.createdAt || 0,
+    lastOpenedAt: project.lastOpenedAt || 0,
+    location: projectDirectory(project.id),
+    thumbnail: project.thumbnail || null,
+    format: project.spec?.format || null,
+    duration: project.duration || null
+  })).sort((a, b) => (b.updatedAt || b.lastOpenedAt) - (a.updatedAt || a.lastOpenedAt));
 }
 
 function validateProject(input) {
@@ -270,21 +334,38 @@ ipcMain.handle('app:info', () => ({
 ipcMain.handle('window:settings', () => { openSettingsWindow(); return true; });
 ipcMain.handle('window:reveal-data', async () => { await shell.openPath(DATA()); return DATA(); });
 
+ipcMain.handle('projects:get-root', () => workspaceRoot());
+ipcMain.handle('projects:choose-root', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose where AI Video Agent projects are saved',
+    defaultPath: workspaceRoot(),
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || !result.filePaths.length) return { canceled: true };
+  const root = result.filePaths[0];
+  await fsp.mkdir(root, { recursive: true });
+  await writeConfig('workspace', { root, updatedAt: Date.now() });
+  return { canceled: false, root };
+});
 ipcMain.handle('projects:list', () => projectList());
 ipcMain.handle('projects:create', async (_event, name) => {
   const project = makeProject(name);
-  await writeJsonAtomic(projectFile(project.id), project);
-  return project;
+  await saveNewProject(project);
+  return { ...project, location: projectDirectory(project.id) };
 });
 ipcMain.handle('projects:load', async (_event, id) => {
-  const project = readJson(projectFile(id), null);
+  const file = projectFile(id);
+  const project = readJson(file, null);
   if (!project) throw new Error('Project not found.');
+  project.lastOpenedAt = Date.now();
+  await writeJsonAtomic(file, project);
   return project;
 });
 ipcMain.handle('projects:save', async (_event, input) => {
   const project = validateProject(input);
-  await writeJsonAtomic(projectFile(project.id), project);
-  return { saved: true, updatedAt: project.updatedAt };
+  const file = await ensureProjectStorage(project);
+  await writeJsonAtomic(file, project);
+  return { saved: true, updatedAt: project.updatedAt, location: projectDirectory(project.id) };
 });
 ipcMain.handle('projects:rename', async (_event, id, name) => {
   const project = readJson(projectFile(id), null);
@@ -294,9 +375,51 @@ ipcMain.handle('projects:rename', async (_event, id, name) => {
   await writeJsonAtomic(projectFile(id), project);
   return { name: project.name };
 });
+ipcMain.handle('projects:duplicate', async (_event, id) => {
+  const source = readJson(projectFile(id), null);
+  if (!source) throw new Error('Project not found.');
+  const copy = {
+    ...source,
+    id: makeProject(source.name + ' copy').id,
+    name: String(source.name || 'Untitled project').slice(0, 92) + ' copy',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    lastOpenedAt: Date.now(),
+    playhead: 0
+  };
+  await saveNewProject(copy);
+  return { id: copy.id, name: copy.name };
+});
 ipcMain.handle('projects:delete', async (_event, id) => {
-  await fsp.rm(projectFile(id), { force: true });
+  const projectId = safeProjectId(id);
+  const index = projectIndex();
+  const file = projectFile(projectId);
+  const indexedDirectory = index[projectId];
+  if (indexedDirectory && path.isAbsolute(indexedDirectory)) {
+    await fsp.rm(indexedDirectory, { recursive: true, force: true });
+    delete index[projectId];
+    await writeConfig('project-index', index);
+  } else {
+    await fsp.rm(file, { force: true });
+  }
   return true;
+});
+ipcMain.handle('projects:reveal', async (_event, id) => {
+  const directory = projectDirectory(id);
+  await fsp.mkdir(directory, { recursive: true });
+  await shell.openPath(directory);
+  return directory;
+});
+ipcMain.handle('ui:get', () => readConfig('ui', { sidebarHidden: false, agentHidden: false }));
+ipcMain.handle('ui:save', async (_event, input) => {
+  const current = readConfig('ui', {});
+  const next = {
+    ...current,
+    sidebarHidden: typeof input.sidebarHidden === 'boolean' ? input.sidebarHidden : !!current.sidebarHidden,
+    agentHidden: typeof input.agentHidden === 'boolean' ? input.agentHidden : !!current.agentHidden
+  };
+  await writeConfig('ui', next);
+  return next;
 });
 
 function importedProject(input) {
@@ -473,7 +596,7 @@ ipcMain.handle('projects:import', async () => {
     throw new Error('Choose an .aivp or .json project file.');
   }
   const project=importedProject(data);
-  await writeJsonAtomic(projectFile(project.id),project);
+  await saveNewProject(project);
   return {imported:true,project:{id:project.id,name:project.name,updatedAt:project.updatedAt}};
 });
 
@@ -651,18 +774,32 @@ ipcMain.handle('settings:save-music', async (_event, value) => {
 });
 
 ipcMain.handle('export:image', async (_event, dataUrl, defaultName) => {
-  if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png;base64,')) throw new Error('Invalid PNG image payload.');
-  const buffer = Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+  if (typeof dataUrl !== 'string') throw new Error('Invalid image payload.');
+  const match = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/i);
+  if (!match) throw new Error('Only PNG and JPEG frame images can be saved.');
+  const extension = match[1].toLowerCase() === 'png' ? 'png' : 'jpg';
+  const prefix = dataUrl.slice(0, dataUrl.indexOf(',') + 1);
+  const buffer = Buffer.from(dataUrl.slice(prefix.length), 'base64');
   if (!buffer.length || buffer.length > 30 * 1024 * 1024) throw new Error('Image is empty or too large.');
+  const suggested = String(defaultName || ('frame.' + extension)).replace(/[<>:"/\\|?*]+/g, '-');
   const result = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: String(defaultName || 'frame.png'),
-    filters: [{ name: 'PNG image', extensions: ['png'] }]
+    defaultPath: suggested,
+    filters: [{ name: 'PNG image', extensions: ['png'] }, { name: 'JPEG image', extensions: ['jpg', 'jpeg'] }]
   });
   if (result.canceled || !result.filePath) return { canceled: true };
-  await fsp.writeFile(result.filePath, buffer);
-  const stat = await fsp.stat(result.filePath);
+  const selectedExtension = path.extname(result.filePath).toLowerCase();
+  const finalPath = selectedExtension ? result.filePath : result.filePath + '.' + extension;
+  await fsp.writeFile(finalPath, buffer);
+  const stat = await fsp.stat(finalPath);
   if (!stat.size) throw new Error('The image was not written to disk.');
-  return { saved: true, path: result.filePath, bytes: stat.size };
+  return { saved: true, path: finalPath, bytes: stat.size };
+});
+ipcMain.handle('export:reveal-file', async (_event, filePath) => {
+  if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || !fs.existsSync(filePath)) {
+    throw new Error('Saved file could not be found.');
+  }
+  shell.showItemInFolder(filePath);
+  return true;
 });
 
 ipcMain.handle('ffmpeg:begin', async (_event, options) => {
