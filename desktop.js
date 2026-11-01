@@ -443,6 +443,226 @@
     }
   }
 
+  function installMediaAgentTools() {
+    if (window.__AIVA_MEDIA_TOOLS__) return;
+    window.__AIVA_MEDIA_TOOLS__ = true;
+    const presets = {
+      'kinetic-title': {name:'Kinetic title',js:'const p = 0.5 + 0.5 * Math.sin(t * 2.2); ctx.save(); ctx.translate(w/2,h/2); ctx.globalAlpha = 0.65 + p*0.35; ctx.lineWidth = 3; ctx.strokeStyle = "#C65A2E"; ctx.beginPath(); ctx.arc(0,0,Math.min(w,h)*0.22 + p*18,0,Math.PI*2); ctx.stroke(); ctx.restore();'},
+      'orbital-rings': {name:'Orbital rings',js:'ctx.save(); ctx.translate(w/2,h/2); for(let i=0;i<4;i++){ const r=Math.min(w,h)*(0.12+i*0.08); ctx.beginPath(); ctx.ellipse(0,0,r,r*0.42,t*0.35+i*0.7,0,Math.PI*2); ctx.lineWidth=3-i*0.4; ctx.strokeStyle=i%2?"#C65A2E":"#171614"; ctx.globalAlpha=0.2+i*0.12; ctx.stroke(); } ctx.restore();'},
+      'particle-field': {name:'Particle field',js:'ctx.save(); for(let i=0;i<28;i++){ const x=(i*97%w), y=(i*173%h); const xx=(x+Math.sin(t*0.6+i)*28+w)%w, yy=(y+Math.cos(t*0.7+i)*24+h)%h; ctx.beginPath(); ctx.arc(xx,yy,2+(i%3),0,Math.PI*2); ctx.fillStyle=i%4?"#171614":"#C65A2E"; ctx.globalAlpha=0.35; ctx.fill(); } ctx.restore();'},
+      waveform: {name:'Waveform',js:'ctx.save(); ctx.lineWidth=3; ctx.strokeStyle="#C65A2E"; ctx.globalAlpha=0.8; ctx.beginPath(); for(let x=0;x<=w;x+=8){ const y=h/2+Math.sin(x*0.035-t*2)*Math.sin(x*0.011+t)*h*0.12; if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y); } ctx.stroke(); ctx.restore();'},
+      'product-spotlight': {name:'Product spotlight',js:'ctx.save(); const r=Math.min(w,h)*0.28; const g=ctx.createRadialGradient(w/2,h/2,2,w/2,h/2,r); g.addColorStop(0,"rgba(198,90,46,0.2)"); g.addColorStop(1,"rgba(198,90,46,0)"); ctx.fillStyle=g; ctx.fillRect(0,0,w,h); ctx.strokeStyle="#C65A2E"; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(w/2,h/2,r,0.1+t*0.35,Math.PI*1.6+t*0.35); ctx.stroke(); ctx.restore();'},
+      'data-bars': {name:'Data bars',js:'ctx.save(); const vals=[0.45,0.8,0.62,0.95,0.55]; const gap=12, bw=(w-4*gap)/5; vals.forEach((v,i)=>{ const bh=(h*0.62)*v*(0.94+0.06*Math.sin(t*2+i)); const x=i*(bw+gap), y=h-bh; ctx.fillStyle=i===3?"#C65A2E":"#171614"; ctx.globalAlpha=0.78; ctx.fillRect(x,y,bw,bh); }); ctx.restore();'}
+    };
+    window.AIVA_MOTION_PRESETS = presets;
+    const descriptions = {
+      generate_captions:'Transcribe the uploaded video and add time-coded, editable subtitle elements.',
+      remove_silence:'Detect silent ranges in the uploaded source video using FFmpeg and remove those gaps from its playback timeline.',
+      smart_reframe:'Change aspect ratio and pan the source-video crop around a focal point so the subject stays inside the frame.',
+      generate_voiceover:'Generate spoken narration from text with the configured TTS API and attach it to the project soundtrack.',
+      auto_transitions:'Apply restrained animated entrances and transition sound cues to scene cuts.',
+      get_brand_kit:'Read the active brand colours, fonts and logo settings.',
+      list_motion_presets:'List reusable JavaScript canvas motion presets.',
+      apply_motion_preset:'Add a reusable code-based motion graphic to a selected scene.',
+      add_video_comment:'Add an anchored comment at the current playhead time and normalized canvas coordinates.'
+    };
+    Object.entries(descriptions).forEach(([name,description]) => { TOOL_HELP[name]=description; });
+
+    TOOL_IMPL.get_brand_kit = () => {
+      const kit=window.AIVA_BRAND_KIT || (settingsData && settingsData.brandKit) || {};
+      return JSON.stringify({name:kit.name||'',primary:kit.primary||'#171614',secondary:kit.secondary||'#F7F6F3',accent:kit.accent||'#C65A2E',headingFont:kit.headingFont||'Inter',bodyFont:kit.bodyFont||'Inter',logoAvailable:!!kit.logoDataUrl,logoPosition:kit.logoPosition||'bottom-right',useLogo:kit.useLogo!==false});
+    };
+    TOOL_IMPL.list_motion_presets = () => JSON.stringify(Object.values(presets).map(p=>({name:p.name,description:p.description||'Editable JavaScript canvas composition'})));
+    TOOL_IMPL.apply_motion_preset = args => {
+      const id=String(args && args.preset || 'orbital-rings');
+      const preset=presets[id];
+      if(!preset)return 'Unknown motion preset. Use list_motion_presets first.';
+      const sceneId=String(args && args.sceneId || (SPEC.scenes[0] && SPEC.scenes[0].id) || '');
+      const scene=SPEC.scenes.find(item=>item.id===sceneId);
+      if(!scene)return 'Build or select a scene first.';
+      scene.elements=scene.elements||[];
+      scene.elements.push({id:scene.id+'.motion'+(scene.elements.length+1),type:'code',label:preset.name+' · reusable motion',x:W/2,y:H/2,w:W,h:H,js:preset.js,anim:'none',delay:0});
+      buildScenes();syncSpec();renderFrame(time);renderPanel();
+      return 'Added '+preset.name+' as editable JavaScript canvas code in '+scene.name+'.';
+    };
+    TOOL_IMPL.auto_transitions = args => {
+      const mode=String(args && args.style || 'fade');
+      const allowed=['fade','rise','slideL','slideR'];
+      const animation=allowed.includes(mode)?mode:'fade';
+      let count=0;
+      (SPEC.scenes||[]).forEach(scene=>{
+        (scene.elements||[]).forEach((element,index)=>{
+          if(!element.anim || element.anim==='none'){
+            element.anim=animation;element.delay=Math.min(0.12,index*0.035);
+            element.dur=Math.max(0.25,Math.min(0.7,Number(args && args.duration)||0.45));count++;
+          }
+        });
+      });
+      try{if(window.SFX_API)window.SFX_API.auto({beat:false});}catch(error){}
+      buildScenes();syncSpec();renderFrame(time);
+      return 'Applied '+animation+' entrance motion to '+count+' elements and added subtle cut sound cues. Existing custom animations were preserved.';
+    };
+    TOOL_IMPL.smart_reframe = args => {
+      const format=String(args && args.format || SPEC.format || '9:16');
+      if(!['9:16','16:9','1:1'].includes(format))return 'Choose 9:16, 16:9 or 1:1.';
+      const fx=Math.max(0,Math.min(1,Number(args && args.focusX == null ? 0.5 : args.focusX)));
+      const fy=Math.max(0,Math.min(1,Number(args && args.focusY == null ? 0.5 : args.focusY)));
+      window.TOOLBOX.setFormat(format);
+      let clips=0;
+      (SPEC.scenes||[]).forEach(scene=>{if(scene.media){scene.media.fit='cover';scene.media.focusX=fx;scene.media.focusY=fy;scene.media.reframeMode='focus';clips++;}});
+      buildScenes();syncSpec();renderFrame(time);
+      return JSON.stringify({format,focus:{x:fx,y:fy},clips,detail:'The selected focal point is centred in the new crop. focusX/focusY are normalized 0–1 coordinates; default is centre.'});
+    };
+    TOOL_IMPL.remove_silence = async args => {
+      if(!window.AIVA_SOURCE_PATH)return 'No source-file path is available. Re-upload the source clip inside the desktop app, then retry.';
+      const result=await A.media.detectSilence({filePath:window.AIVA_SOURCE_PATH,thresholdDb:Number(args && args.thresholdDb)||-35,minimumSeconds:Number(args && args.minimumSeconds)||0.35,paddingSeconds:Number(args && args.paddingSeconds)||0.08,duration:Number(MEDIA.video && MEDIA.video.duration)||0});
+      const scene=SPEC.scenes.find(item=>item.media);
+      if(!scene)return 'Upload a video clip first so the agent can attach the silence edit to its media scene.';
+      if(!result.keepRanges || !result.keepRanges.length)return 'No usable speech segments were found. The source timeline was left unchanged.';
+      scene.media.keepRanges=result.keepRanges;scene.media.sourceDuration=result.duration;
+      scene.media.silenceCut={thresholdDb:result.thresholdDb,minimumSeconds:result.minimumSeconds};
+      scene.dur=+result.keepRanges.reduce((sum,item)=>sum+item.end-item.start,0).toFixed(3);
+      buildScenes();syncSpec();setTime(0);renderFrame(time);
+      return JSON.stringify({removedSeconds:result.removedSeconds,originalDuration:result.duration,newDuration:scene.dur,removedRanges:result.silences.length,keptRanges:result.keepRanges.length,method:'FFmpeg silencedetect; source media is remapped during preview and export'});
+    };
+    TOOL_IMPL.generate_captions = async args => {
+      if(!window.AIVA_SOURCE_PATH)return 'No source-file path is available. Re-upload the source clip inside the desktop app, then retry.';
+      const result=await A.media.transcribe({filePath:window.AIVA_SOURCE_PATH,language:String(args && args.language || 'auto')});
+      const scene=SPEC.scenes.find(item=>item.media)||SPEC.scenes[0];
+      if(!scene)return 'Build a scene or upload a clip first.';
+      const ranges=scene.media && scene.media.keepRanges;
+      const sourceToLocal=sourceTime=>{
+        if(!Array.isArray(ranges)||!ranges.length)return sourceTime;
+        let total=0;
+        for(const range of ranges){if(sourceTime>=range.start && sourceTime<=range.end)return total+(sourceTime-range.start);total+=Math.max(0,range.end-range.start);}
+        return -1;
+      };
+      scene.elements=scene.elements||[];
+      const width=FORMATS[SPEC.format]?FORMATS[SPEC.format][0]:1080;
+      const height=FORMATS[SPEC.format]?FORMATS[SPEC.format][1]:1920;
+      const brand=window.AIVA_BRAND_KIT||{};
+      let added=0;
+      result.segments.forEach((segment,index)=>{
+        const start=sourceToLocal(segment.start),end=sourceToLocal(segment.end);
+        if(start<0||end<=start||!segment.text)return;
+        const text=segment.text.replace(/\s+/g,' ').trim();if(!text)return;
+        scene.elements.push({id:scene.id+'.caption'+(scene.elements.length+1),type:'text',label:'Caption '+(index+1),text,
+          x:width/2,y:height*0.84,size:Math.max(38,Math.min(58,width*0.045)),color:'#FFFFFF',outline:4,strokeColor:'#171614',
+          family:brand.bodyFont||'Inter',weight:700,align:'center',anim:'fade',delay:start,dur:0.22,start,end,fit:true,margin:80});
+        added++;
+      });
+      if(!added)return 'Transcription succeeded but no segments overlapped the current kept timeline.';
+      buildScenes();syncSpec();renderFrame(time);
+      return JSON.stringify({captionsAdded:added,language:result.language,duration:result.duration,style:'Editable timed text using the active Brand Kit body font'});
+    };
+    TOOL_IMPL.generate_voiceover = async args => {
+      const text=String(args && args.text || '').trim();if(!text)return 'Provide narration text.';
+      const result=await A.media.generateVoiceover({text,projectId,voice:args.voice});
+      MUSIC.dataUrl=result.dataUrl;MUSIC.name='AI voiceover';MUSIC.on=true;
+      MUSIC.volume=Math.max(0,Math.min(1,Number(args && args.volume)||0.85));MUSIC.dur=0;
+      hookMusicAudio();applyMusic(true);if(typeof setMusicOn==='function')setMusicOn(true);
+      scheduleSave();
+      return JSON.stringify({voiceover:'generated',file:result.file,bytes:result.bytes,mime:result.mime,syncedToProjectPlayhead:true});
+    };
+    TOOL_IMPL.add_video_comment = args => {
+      const comment={
+        id:'c_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
+        text:String(args && args.text || '').slice(0,1200),
+        time:Math.max(0,Math.min(DUR,Number(args && args.time == null ? time : args.time))),
+        x:Math.max(0,Math.min(1,Number(args && args.x == null ? 0.5 : args.x))),
+        y:Math.max(0,Math.min(1,Number(args && args.y == null ? 0.5 : args.y))),
+        createdAt:Date.now(),resolved:false
+      };
+      if(!comment.text)return 'A comment needs text.';
+      projectComments.push(comment);renderCommentMarkers();scheduleSave();return JSON.stringify(comment);
+    };
+    const previousSchema=window.toolSchema;
+    if(previousSchema && !window.__AIVA_SCHEMA_EXTENDED__){
+      window.__AIVA_SCHEMA_EXTENDED__=true;
+      window.toolSchema=function(){
+        const schema=previousSchema.apply(this,arguments);
+        const extras={
+          generate_captions:{type:'object',properties:{language:{type:'string'}},required:[]},
+          remove_silence:{type:'object',properties:{thresholdDb:{type:'number'},minimumSeconds:{type:'number'},paddingSeconds:{type:'number'}},required:[]},
+          smart_reframe:{type:'object',properties:{format:{type:'string',enum:['9:16','16:9','1:1']},focusX:{type:'number'},focusY:{type:'number'}},required:['format']},
+          generate_voiceover:{type:'object',properties:{text:{type:'string'},voice:{type:'string'},volume:{type:'number'}},required:['text']},
+          auto_transitions:{type:'object',properties:{style:{type:'string',enum:['fade','rise','slideL','slideR']},duration:{type:'number'}},required:[]},
+          apply_motion_preset:{type:'object',properties:{preset:{type:'string',enum:Object.keys(presets)},sceneId:{type:'string'}},required:['preset']},
+          add_video_comment:{type:'object',properties:{text:{type:'string'},time:{type:'number'},x:{type:'number'},y:{type:'number'}},required:['text']}
+        };
+        return schema.concat(Object.keys(extras).filter(name=>TOOL_IMPL[name]).map(name=>({type:'function',function:{name,description:TOOL_HELP[name]||name,parameters:extras[name]}})));
+      };
+    }
+    const previousPrompt=window.systemPrompt;
+    if(previousPrompt && !window.__AIVA_BRAND_PROMPT__){
+      window.__AIVA_BRAND_PROMPT__=true;
+      window.systemPrompt=function(){
+        let prompt=previousPrompt.apply(this,arguments);
+        const kit=window.AIVA_BRAND_KIT||{};
+        if(kit.name||kit.primary||kit.logoDataUrl){
+          prompt+='\n\nBRAND KIT (REQUIRED FOR ALL NEW SCENES):\nBrand: '+(kit.name||'unnamed')+
+            '\nPrimary: '+(kit.primary||'#171614')+'\nSecondary: '+(kit.secondary||'#F7F6F3')+
+            '\nAccent: '+(kit.accent||'#C65A2E')+'\nHeading font: '+(kit.headingFont||'Inter')+
+            '\nBody font: '+(kit.bodyFont||'Inter')+'\nLogo available: '+(kit.logoDataUrl?'yes, persistent app overlay':'no')+
+            '\nUse these exact colours and fonts consistently; do not invent a competing palette.';
+        }
+        if(projectTemplate && projectTemplate!=='blank')prompt+='\n\nSTARTER TEMPLATE: '+projectTemplate+'. Treat it as an editable scaffold and rewrite the scenes to match the user brief.';
+        if(settingsData && settingsData.integrations && settingsData.integrations.motionLibrary){
+          prompt+='\n\nMOTION LIBRARY: Use apply_motion_preset when reusable code animation is helpful. Existing code elements run JavaScript on the native canvas; keep code deterministic, performant and editable. Do not claim unavailable Lottie or Three.js rendering.';
+        }
+        return prompt;
+      };
+    }
+    const previousRun=window.runAgent;
+    if(previousRun && !window.__AIVA_VERSION_WRAPPER__){
+      window.__AIVA_VERSION_WRAPPER__=true;
+      window.runAgent=async function(){
+        const before=JSON.stringify(window.SPEC||{});
+        const result=await previousRun.apply(this,arguments);
+        if(projectId && !window.__EXPORTING){
+          const after=JSON.stringify(window.SPEC||{});
+          if(before!==after){
+            try{await A.project.createVersion(projectId,String(arguments[0]||'AI iteration').slice(0,100),currentProjectData());}
+            catch(error){console.warn('Could not create project version',error);}
+            renderProjectSidebar();
+          }
+        }
+        return result;
+      };
+    }
+  }
+
+  function applyAivaBrandKit(kit) {
+    if(!kit || !kit.logoDataUrl || kit.useLogo===false){brandImage=null;brandImageSource='';return;}
+    if(brandImageSource===kit.logoDataUrl && brandImage)return;
+    brandImageSource=kit.logoDataUrl;
+    const img=new Image();
+    img.onload=()=>{brandImage=img;try{if(typeof window.renderFrame==='function')window.renderFrame(time);}catch(error){}};
+    img.onerror=()=>{brandImage=null;console.warn('Brand logo could not be decoded.');};
+    img.src=kit.logoDataUrl;
+    const original=window.renderFrame;
+    if(original && !original.__aivaBrandOverlay){
+      const wrapped=function(t){
+        const result=original.apply(this,arguments);
+        const active=window.AIVA_BRAND_KIT||{};
+        const canvas=$id('stage');
+        if(brandImage && canvas && active.useLogo!==false && brandImage.complete && brandImage.naturalWidth){
+          const context=canvas.getContext('2d');
+          const maxW=canvas.width*0.13,maxH=canvas.height*0.08;
+          const scale=Math.min(maxW/brandImage.naturalWidth,maxH/brandImage.naturalHeight);
+          const w=brandImage.naturalWidth*scale,h=brandImage.naturalHeight*scale;
+          const pad=Math.min(canvas.width,canvas.height)*0.035;
+          const position=active.logoPosition||'bottom-right';
+          const x=position.includes('left')?pad:canvas.width-w-pad;
+          const y=position.includes('top')?pad:canvas.height-h-pad;
+          context.save();context.globalAlpha=0.94;context.drawImage(brandImage,x,y,w,h);context.restore();
+        }
+        return result;
+      };
+      wrapped.__aivaBrandOverlay=true;window.renderFrame=wrapped;
+    }
+  }
+
   function installSelectionContext() {
     const composer = document.querySelector('.composer');
     if (!composer || $id('selectionContext')) return;
